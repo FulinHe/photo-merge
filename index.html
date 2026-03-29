@@ -219,6 +219,42 @@
     .preset-card span {
       word-break: break-word;
     }
+
+    .progress-wrap {
+      display: none;
+      margin: 14px 0 10px;
+    }
+    .progress-wrap.visible {
+      display: block;
+    }
+    .progress-bar {
+      height: 8px;
+      background: #e2e8f0;
+      border-radius: 999px;
+      overflow: hidden;
+    }
+    .progress-fill {
+      height: 100%;
+      width: 35%;
+      border-radius: 999px;
+      background: linear-gradient(90deg, var(--p), #818cf8);
+      transition: transform 0.2s;
+    }
+    .progress-fill.indeterminate {
+      animation: progressIndet 1.2s ease-in-out infinite;
+    }
+    @keyframes progressIndet {
+      0% { transform: translateX(-100%); width: 40%; }
+      50% { width: 55%; }
+      100% { transform: translateX(280%); width: 40%; }
+    }
+    .progress-text {
+      font-size: 12px;
+      color: #64748b;
+      margin: 8px 0 0;
+      line-height: 1.45;
+      min-height: 2.9em;
+    }
   </style>
 </head>
 <body>
@@ -257,6 +293,14 @@
       </details>
 
       <button type="button" id="submit-btn" disabled>提交合成</button>
+
+      <div id="progress-wrap" class="progress-wrap" role="status" aria-live="polite">
+        <div class="progress-bar" aria-hidden="true">
+          <div id="progress-fill" class="progress-fill indeterminate"></div>
+        </div>
+        <p id="progress-text" class="progress-text"></p>
+      </div>
+
       <p id="msg"></p>
       <div id="result-wrap"></div>
     </div>
@@ -271,6 +315,13 @@
     let currentPreset = null;
     let avatarLayerId = null;
     const textLayerParse = {};
+
+    let renderProgressFallbackTimer = null;
+    const renderProgressHints = [
+      "仍在处理中，请勿关闭页面…",
+      "大图与二维码耗时较长属正常现象",
+      "若超过两分钟无结果，可请管理员查看中枢日志"
+    ];
 
     const statusDot = document.getElementById("status-dot");
     const statusText = document.getElementById("status-text");
@@ -291,6 +342,38 @@
 
     function setMsg(t) {
       document.getElementById("msg").textContent = t || "";
+    }
+
+    function startRenderProgressUI(initialText) {
+      const wrap = document.getElementById("progress-wrap");
+      const fill = document.getElementById("progress-fill");
+      const txt = document.getElementById("progress-text");
+      wrap.classList.add("visible");
+      fill.classList.add("indeterminate");
+      txt.textContent = initialText || "处理中…";
+      let i = 0;
+      if (renderProgressFallbackTimer) clearInterval(renderProgressFallbackTimer);
+      renderProgressFallbackTimer = setInterval(() => {
+        i = (i + 1) % renderProgressHints.length;
+        txt.textContent = renderProgressHints[i];
+      }, 4500);
+    }
+
+    function setRenderProgressText(text) {
+      document.getElementById("progress-text").textContent = text || "";
+    }
+
+    function stopRenderProgressUI() {
+      const wrap = document.getElementById("progress-wrap");
+      const fill = document.getElementById("progress-fill");
+      const txt = document.getElementById("progress-text");
+      wrap.classList.remove("visible");
+      fill.classList.remove("indeterminate");
+      txt.textContent = "";
+      if (renderProgressFallbackTimer) {
+        clearInterval(renderProgressFallbackTimer);
+        renderProgressFallbackTimer = null;
+      }
     }
 
     function renderPresetPicker(items) {
@@ -398,12 +481,29 @@
       const texts = layers.filter((x) => x.type === "text");
       const images = layers.filter((x) => x.type === "image");
       const avatarLayer = images.find((x) => !x.isQrLayer) || null;
+      const hasQrLayer = images.some((x) => x.isQrLayer);
+      const hasCertTextLine = texts.some((layer) => {
+        const pr = parseQuotedAfterColon(layer.text);
+        return (
+          pr.mode === "edit" &&
+          (pr.title === "证件号" || pr.title === "证件编号")
+        );
+      });
 
       const intro = document.createElement("p");
       intro.className = "pf-desc";
       intro.style.marginTop = "4px";
-      intro.textContent =
-        "模板里请使用「标签：" + '"填写内容"' + "」这种写法；此处只填引号里的字。头像请选本地图片替换（对应预设里的照片图层）。";
+      let introTxt =
+        "模板里请使用「标签：" + '"填写内容"' + "」这种写法；此处只填引号里的字。";
+      if (hasQrLayer && hasCertTextLine) {
+        introTxt +=
+          " 含「证件号」或「证件编号」行时，引号内的编号会在合成时自动写入二维码。";
+      } else if (hasQrLayer) {
+        introTxt +=
+          " 本预设含二维码：请在下方填写编号，或自己在模板中加一行「证件号：" + '"编号"' + "」。";
+      }
+      introTxt += " 头像可替换为本地图片。";
+      intro.textContent = introTxt;
       box.appendChild(intro);
 
       if (texts.length) {
@@ -448,7 +548,9 @@
         sec.appendChild(h);
         const hint = document.createElement("p");
         hint.className = "pf-desc";
-        hint.textContent = "替换证件照/头像；二维码等图层不会在界面里修改。";
+        hint.textContent = hasQrLayer
+          ? "替换证件照/头像；若已填写证件号，二维码会随编号自动更新。"
+          : "替换证件照/头像。";
         sec.appendChild(hint);
         if (avatarLayer.dataUrl) {
           const im = document.createElement("img");
@@ -477,12 +579,37 @@
         box.appendChild(sec);
       }
 
-      if (!texts.length && !avatarLayer) {
+      if (hasQrLayer && !hasCertTextLine) {
+        const sec = document.createElement("div");
+        sec.className = "pf-section";
+        const h = document.createElement("h4");
+        h.className = "pf-h";
+        h.textContent = "二维码编号";
+        sec.appendChild(h);
+        const d = document.createElement("p");
+        d.className = "pf-desc";
+        d.textContent =
+          "模板中未单独做「证件号」文字行时，在此填写要写入二维码的编号（与导出预设里的 URL 模板 {id} 对应）。";
+        sec.appendChild(d);
+        const inp = document.createElement("input");
+        inp.type = "text";
+        inp.id = "field-qr-cert";
+        inp.autocomplete = "off";
+        inp.placeholder = "输入编号";
+        const ui0 = preset.ui || {};
+        inp.value = ui0.certId != null ? String(ui0.certId) : "";
+        sec.appendChild(inp);
+        box.appendChild(sec);
+      }
+
+      const canSubmitSomething =
+        texts.length > 0 || avatarLayer || hasQrLayer;
+      if (!canSubmitSomething) {
         const sec = document.createElement("div");
         sec.className = "pf-section";
         const p = document.createElement("p");
         p.className = "pf-err";
-        p.textContent = "该预设没有可填写的文字层，也没有非二维码的图片层。";
+        p.textContent = "该预设没有可填写的文字、头像或二维码编号。";
         sec.appendChild(p);
         box.appendChild(sec);
       }
@@ -507,17 +634,39 @@
           }
         }
       }
+
+      p.ui = p.ui || {};
+      for (const layer of p.layers || []) {
+        if (layer.type !== "text") continue;
+        const te = document.getElementById("field-text-" + layer.id);
+        const parsed = textLayerParse[layer.id];
+        if (!te || !parsed || parsed.mode !== "edit") continue;
+        const t = String(parsed.title || "").replace(/\s/g, "");
+        if (t === "证件号" || t === "证件编号") {
+          p.ui.certId = String(te.value || "").trim();
+          break;
+        }
+      }
+      const qrField = document.getElementById("field-qr-cert");
+      if (qrField && String(qrField.value || "").trim()) {
+        if (!p.ui.certId) p.ui.certId = String(qrField.value || "").trim();
+      }
+
       return p;
     }
 
     document.getElementById("submit-btn").addEventListener("click", async () => {
       if (!conn || !conn.open) return;
-      setMsg("正在合成…");
+      setMsg("");
       document.getElementById("submit-btn").disabled = true;
+      startRenderProgressUI("正在准备数据…");
       try {
         const preset = await buildPresetFromForm();
+        setRenderProgressText("正在发送到管理端…");
         conn.send({ type: "RENDER_REQUEST", preset });
+        setRenderProgressText("已发送，等待管理端处理…");
       } catch (e) {
+        stopRenderProgressUI();
         setMsg(e.message || String(e));
         document.getElementById("submit-btn").disabled = false;
       }
@@ -554,7 +703,18 @@
         setMsg("填写或替换后点击提交合成");
         return;
       }
+      if (data.type === "RENDER_PROGRESS") {
+        document.getElementById("progress-wrap").classList.add("visible");
+        document.getElementById("progress-fill").classList.add("indeterminate");
+        if (renderProgressFallbackTimer) {
+          clearInterval(renderProgressFallbackTimer);
+          renderProgressFallbackTimer = null;
+        }
+        setRenderProgressText(data.text);
+        return;
+      }
       if (data.type === "RENDER_RESULT") {
+        stopRenderProgressUI();
         document.getElementById("submit-btn").disabled = false;
         const wrap = document.getElementById("result-wrap");
         wrap.innerHTML = "";
