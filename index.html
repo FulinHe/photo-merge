@@ -1,0 +1,612 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>证件合成 — 用户端</title>
+  <script src="https://cdn.jsdelivr.net/npm/peerjs@1.5.2/dist/peerjs.min.js"></script>
+  <style>
+    :root {
+      --p: #6366f1;
+      --s: #10b981;
+      --err: #ef4444;
+      --gray: #94a3b8;
+    }
+    body {
+      font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+      background: #f1f5f9;
+      display: flex;
+      justify-content: center;
+      padding: 40px 16px;
+      margin: 0;
+    }
+    .card {
+      background: #fff;
+      padding: 28px;
+      border-radius: 20px;
+      width: min(640px, 100%);
+      box-shadow: 0 12px 40px rgba(15, 23, 42, 0.08);
+    }
+    .status-tag {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 12px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 600;
+      background: #f8fafc;
+      border: 1px solid #e2e8f0;
+      margin-bottom: 16px;
+    }
+    .dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--gray);
+    }
+    .dot.online { background: var(--s); box-shadow: 0 0 8px var(--s); }
+    .dot.sync { background: var(--p); }
+    .dot.error { background: var(--err); }
+
+    h3 { text-align: center; color: #1e293b; margin: 0 0 8px; }
+    .sub { text-align: center; font-size: 12px; color: #64748b; margin-bottom: 20px; }
+
+    input, select, textarea, button:not(.preset-card) {
+      width: 100%;
+      padding: 12px 14px;
+      margin: 8px 0;
+      border-radius: 10px;
+      border: 1px solid #e2e8f0;
+      box-sizing: border-box;
+      font-size: 14px;
+    }
+    input[type="color"] {
+      padding: 4px;
+      height: 44px;
+      cursor: pointer;
+    }
+    input[type="file"] {
+      padding: 8px;
+      font-size: 13px;
+    }
+    textarea.field-text {
+      min-height: 72px;
+      resize: vertical;
+      font-family: inherit;
+      line-height: 1.5;
+    }
+    button {
+      background: var(--p);
+      color: #fff;
+      border: none;
+      font-weight: 700;
+      cursor: pointer;
+    }
+    button:disabled { background: #cbd5e1; cursor: not-allowed; }
+
+    #login-box, #work-box { margin-top: 4px; }
+    #result-wrap { margin-top: 16px; text-align: center; }
+    #result-wrap img {
+      max-width: 100%;
+      border-radius: 8px;
+      border: 1px solid #e2e8f0;
+    }
+    #msg { font-size: 12px; color: #94a3b8; text-align: center; margin-top: 10px; }
+    label.field { font-size: 12px; color: #64748b; display: block; margin-top: 10px; }
+    label.field:first-child { margin-top: 0; }
+
+    .pf-section {
+      margin-top: 18px;
+      padding-top: 16px;
+      border-top: 1px solid #e2e8f0;
+    }
+    .pf-section:first-of-type { border-top: 0; margin-top: 8px; padding-top: 0; }
+    .pf-h {
+      font-size: 14px;
+      font-weight: 700;
+      color: #334155;
+      margin: 0 0 6px;
+    }
+    .pf-desc {
+      font-size: 12px;
+      color: #94a3b8;
+      margin: 0 0 10px;
+      line-height: 1.45;
+    }
+    .pf-layer {
+      background: #f8fafc;
+      border: 1px solid #e2e8f0;
+      border-radius: 12px;
+      padding: 12px;
+      margin-bottom: 10px;
+    }
+    .pf-layer-title {
+      font-size: 12px;
+      font-weight: 600;
+      color: #475569;
+      margin-bottom: 8px;
+    }
+    .pf-thumb {
+      max-width: 100%;
+      max-height: 140px;
+      border-radius: 8px;
+      border: 1px solid #e2e8f0;
+      display: block;
+      margin-bottom: 8px;
+      background: #fff;
+    }
+    .pf-err { color: var(--err); font-size: 13px; margin: 8px 0; }
+    details.adv {
+      margin-top: 14px;
+      font-size: 12px;
+      color: #64748b;
+    }
+    details.adv summary { cursor: pointer; user-select: none; }
+    details.adv textarea {
+      margin-top: 8px;
+      min-height: 120px;
+      font-family: Consolas, monospace;
+      font-size: 11px;
+    }
+    details.adv-login {
+      margin-top: 12px;
+      font-size: 12px;
+      color: #64748b;
+    }
+    details.adv-login summary {
+      cursor: pointer;
+      user-select: none;
+    }
+    details.adv-login input {
+      margin-top: 0;
+    }
+
+    .preset-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(112px, 1fr));
+      gap: 10px;
+      margin-top: 8px;
+    }
+    button.preset-card {
+      width: auto;
+      min-width: 0;
+      padding: 8px;
+      margin: 0;
+      background: #f8fafc;
+      border: 2px solid #e2e8f0;
+      color: #334155;
+      font-weight: 600;
+      font-size: 11px;
+      line-height: 1.3;
+      display: flex;
+      flex-direction: column;
+      align-items: stretch;
+      gap: 6px;
+      border-radius: 12px;
+      cursor: pointer;
+      text-align: center;
+    }
+    button.preset-card:hover {
+      border-color: #cbd5e1;
+    }
+    button.preset-card.selected {
+      border-color: var(--p);
+      background: #eef2ff;
+      box-shadow: 0 0 0 1px rgba(99, 102, 241, 0.25);
+    }
+    button.preset-card img {
+      width: 100%;
+      height: 76px;
+      object-fit: cover;
+      border-radius: 8px;
+      margin: 0;
+      padding: 0;
+      border: none;
+    }
+    .preset-card-ph {
+      width: 100%;
+      height: 76px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: #e2e8f0;
+      color: #64748b;
+      font-size: 16px;
+      font-weight: 700;
+      border-radius: 8px;
+    }
+    .preset-card span {
+      word-break: break-word;
+    }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div style="text-align:center;">
+      <div class="status-tag">
+        <div id="status-dot" class="dot"></div>
+        <span id="status-text">正在初始化…</span>
+      </div>
+    </div>
+
+    <h3>证件合成 · 用户端</h3>
+    <p class="sub">选择预设后，只需填写引号内的文字，并可选替换头像图（头像.png）。</p>
+
+    <div id="login-box">
+      <input type="text" id="u" placeholder="账号" autocomplete="username" />
+      <input type="password" id="p" placeholder="密码" autocomplete="current-password" />
+      <button type="button" id="login-btn">连接并登录</button>
+      <details class="adv-login">
+        <summary>高级：自定义中枢 ID</summary>
+        <p class="pf-desc" style="margin:8px 0 4px;">一般不用改；仅当你的管理端使用了其它 Peer ID 时再填写。</p>
+        <input type="text" id="admin-id" placeholder="留空则使用内置默认" autocomplete="off" />
+      </details>
+    </div>
+
+    <div id="work-box" style="display:none;">
+      <label class="field">选择预设</label>
+      <p class="pf-desc" style="margin:0 0 4px;">点击下方卡片（图为管理端同名预览图）</p>
+      <div id="preset-grid" class="preset-grid" aria-label="预设列表"></div>
+
+      <div id="preset-form"></div>
+
+      <details class="adv">
+        <summary>高级：查看原始 JSON（一般不必打开）</summary>
+        <textarea id="preset-json-view" readonly placeholder="选择预设后出现…"></textarea>
+      </details>
+
+      <button type="button" id="submit-btn" disabled>提交合成</button>
+      <p id="msg"></p>
+      <div id="result-wrap"></div>
+    </div>
+  </div>
+
+  <script>
+    const ADMIN_ID_DEFAULT = "IDCARD_SYNTH_ADMIN_2026";
+    const PRESET_VERSION = 1;
+
+    let peer = new Peer();
+    let conn = null;
+    let currentPreset = null;
+    let avatarLayerId = null;
+    const textLayerParse = {};
+
+    const statusDot = document.getElementById("status-dot");
+    const statusText = document.getElementById("status-text");
+
+    function updateStatus(state, msg) {
+      statusText.textContent = msg;
+      statusDot.className = "dot " + state;
+    }
+
+    peer.on("open", () => {
+      updateStatus("", "已进入 P2P，请登录");
+    });
+
+    peer.on("error", (err) => {
+      updateStatus("error", "网络错误");
+      console.error(err);
+    });
+
+    function setMsg(t) {
+      document.getElementById("msg").textContent = t || "";
+    }
+
+    function renderPresetPicker(items) {
+      const grid = document.getElementById("preset-grid");
+      grid.innerHTML = "";
+      (items || []).forEach((it) => {
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "preset-card";
+        btn.dataset.id = it.id;
+        if (it.previewDataUrl) {
+          const img = document.createElement("img");
+          img.src = it.previewDataUrl;
+          img.alt = "";
+          btn.appendChild(img);
+        } else {
+          const ph = document.createElement("div");
+          ph.className = "preset-card-ph";
+          ph.textContent = (it.name || it.id || "?").trim().slice(0, 2) || "?";
+          btn.appendChild(ph);
+        }
+        const cap = document.createElement("span");
+        cap.textContent = it.name || it.id;
+        btn.appendChild(cap);
+        btn.addEventListener("click", () => {
+          grid.querySelectorAll(".preset-card").forEach((c) => {
+            c.classList.toggle("selected", c === btn);
+          });
+          clearPresetForm();
+          document.getElementById("submit-btn").disabled = true;
+          if (!conn || !conn.open) return;
+          setMsg("正在拉取预设…");
+          conn.send({ type: "PRESET_GET", id: it.id });
+        });
+        grid.appendChild(btn);
+      });
+    }
+
+    function fileToDataUrl(file) {
+      return new Promise((resolve, reject) => {
+        const fr = new FileReader();
+        fr.onload = () => resolve(fr.result);
+        fr.onerror = reject;
+        fr.readAsDataURL(file);
+      });
+    }
+
+    function clearPresetForm() {
+      document.getElementById("preset-form").innerHTML = "";
+      document.getElementById("preset-json-view").value = "";
+      currentPreset = null;
+      avatarLayerId = null;
+      for (const k of Object.keys(textLayerParse)) delete textLayerParse[k];
+    }
+
+    /**
+     * 解析「冒号后」内容；若整体被英文双引号包裹则只编辑引号内，提交时再包回去。
+     * 无冒号时整段作为可编辑内容（兼容旧模板）。
+     */
+    function parseQuotedAfterColon(text) {
+      const raw = String(text ?? "");
+      const m = raw.match(/^([\s\S]+?[：:])([\s\S]*)$/);
+      if (!m) {
+        return { mode: "full", full: raw };
+      }
+      const prefix = m[1];
+      let rest = m[2].trim();
+      let quoted = false;
+      if (rest.length >= 2 && rest[0] === '"' && rest[rest.length - 1] === '"') {
+        quoted = true;
+        rest = rest.slice(1, -1);
+      }
+      const title = prefix.replace(/[：:]\s*$/, "").trim() || "内容";
+      return { mode: "edit", prefix, value: rest, quoted, title };
+    }
+
+    function rebuildQuotedAfterColon(parsed, newValue) {
+      if (parsed.mode === "full") return String(newValue ?? "");
+      const v = String(newValue ?? "");
+      if (parsed.quoted) return parsed.prefix + '"' + v + '"';
+      return parsed.prefix + v;
+    }
+
+    function renderPresetForm(preset) {
+      const box = document.getElementById("preset-form");
+      const jsonView = document.getElementById("preset-json-view");
+      box.innerHTML = "";
+      jsonView.value = "";
+      avatarLayerId = null;
+      for (const k of Object.keys(textLayerParse)) delete textLayerParse[k];
+
+      if (!preset || preset.version !== PRESET_VERSION) {
+        const p = document.createElement("p");
+        p.className = "pf-err";
+        p.textContent = "无法识别该预设（需 version " + PRESET_VERSION + "）";
+        box.appendChild(p);
+        currentPreset = null;
+        return;
+      }
+
+      currentPreset = JSON.parse(JSON.stringify(preset));
+      jsonView.value = JSON.stringify(currentPreset, null, 2);
+
+      const layers = preset.layers || [];
+      const texts = layers.filter((x) => x.type === "text");
+      const images = layers.filter((x) => x.type === "image");
+      const avatarLayer = images.find((x) => !x.isQrLayer) || null;
+
+      const intro = document.createElement("p");
+      intro.className = "pf-desc";
+      intro.style.marginTop = "4px";
+      intro.textContent =
+        "模板里请使用「标签：" + '"填写内容"' + "」这种写法；此处只填引号里的字。头像请选本地图片替换（对应预设里的照片图层）。";
+      box.appendChild(intro);
+
+      if (texts.length) {
+        const sec = document.createElement("div");
+        sec.className = "pf-section";
+        const h = document.createElement("h4");
+        h.className = "pf-h";
+        h.textContent = "文字（引号内）";
+        sec.appendChild(h);
+        texts.forEach((layer) => {
+          const parsed = parseQuotedAfterColon(layer.text);
+          textLayerParse[layer.id] = parsed;
+
+          const wrap = document.createElement("div");
+          wrap.className = "pf-layer";
+          const title = document.createElement("div");
+          title.className = "pf-layer-title";
+          if (parsed.mode === "edit") {
+            title.textContent = parsed.title;
+          } else {
+            title.textContent = "整段文字（本行无冒号分隔，可整段修改）";
+          }
+          const ta = document.createElement("textarea");
+          ta.className = "field-text";
+          ta.id = "field-text-" + layer.id;
+          ta.value = parsed.mode === "full" ? parsed.full : parsed.value;
+          ta.rows = parsed.mode === "full" ? 4 : 2;
+          wrap.appendChild(title);
+          wrap.appendChild(ta);
+          sec.appendChild(wrap);
+        });
+        box.appendChild(sec);
+      }
+
+      if (avatarLayer) {
+        avatarLayerId = avatarLayer.id;
+        const sec = document.createElement("div");
+        sec.className = "pf-section";
+        const h = document.createElement("h4");
+        h.className = "pf-h";
+        h.textContent = "头像（头像.png）";
+        sec.appendChild(h);
+        const hint = document.createElement("p");
+        hint.className = "pf-desc";
+        hint.textContent = "替换证件照/头像；二维码等图层不会在界面里修改。";
+        sec.appendChild(hint);
+        if (avatarLayer.dataUrl) {
+          const im = document.createElement("img");
+          im.className = "pf-thumb";
+          im.alt = "当前头像预览";
+          im.src = avatarLayer.dataUrl;
+          sec.appendChild(im);
+        }
+        const lf = document.createElement("label");
+        lf.className = "field";
+        lf.textContent = "选择图片替换";
+        const fi = document.createElement("input");
+        fi.type = "file";
+        fi.id = "field-avatar";
+        fi.accept = "image/*";
+        sec.appendChild(lf);
+        sec.appendChild(fi);
+        box.appendChild(sec);
+      } else if (images.length) {
+        const sec = document.createElement("div");
+        sec.className = "pf-section";
+        const p = document.createElement("p");
+        p.className = "pf-desc";
+        p.textContent = "当前预设只有二维码等图片层，没有可作为头像替换的照片图层。";
+        sec.appendChild(p);
+        box.appendChild(sec);
+      }
+
+      if (!texts.length && !avatarLayer) {
+        const sec = document.createElement("div");
+        sec.className = "pf-section";
+        const p = document.createElement("p");
+        p.className = "pf-err";
+        p.textContent = "该预设没有可填写的文字层，也没有非二维码的图片层。";
+        sec.appendChild(p);
+        box.appendChild(sec);
+      }
+    }
+
+    async function buildPresetFromForm() {
+      if (!currentPreset) throw new Error("未加载预设");
+      const p = JSON.parse(JSON.stringify(currentPreset));
+
+      for (const layer of p.layers || []) {
+        if (layer.type === "text") {
+          const te = document.getElementById("field-text-" + layer.id);
+          const parsed = textLayerParse[layer.id];
+          if (te && parsed) {
+            layer.text = rebuildQuotedAfterColon(parsed, te.value);
+          }
+        }
+        if (layer.type === "image" && avatarLayerId && layer.id === avatarLayerId) {
+          const fe = document.getElementById("field-avatar");
+          if (fe && fe.files && fe.files[0]) {
+            layer.dataUrl = await fileToDataUrl(fe.files[0]);
+          }
+        }
+      }
+      return p;
+    }
+
+    document.getElementById("submit-btn").addEventListener("click", async () => {
+      if (!conn || !conn.open) return;
+      setMsg("正在合成…");
+      document.getElementById("submit-btn").disabled = true;
+      try {
+        const preset = await buildPresetFromForm();
+        conn.send({ type: "RENDER_REQUEST", preset });
+      } catch (e) {
+        setMsg(e.message || String(e));
+        document.getElementById("submit-btn").disabled = false;
+      }
+    });
+
+    function onData(data) {
+      if (data.type === "AUTH_OK") {
+        updateStatus("sync", "已登录");
+        document.getElementById("login-box").style.display = "none";
+        document.getElementById("work-box").style.display = "block";
+        setMsg("等待管理端推送预设列表…");
+        return;
+      }
+      if (data.type === "AUTH_FAIL") {
+        updateStatus("error", "账号或密码错误");
+        setMsg("");
+        return;
+      }
+      if (data.type === "PRESET_LIST") {
+        renderPresetPicker(data.items);
+        clearPresetForm();
+        document.getElementById("submit-btn").disabled = true;
+        setMsg(data.items && data.items.length ? "请点击上方预设卡片" : "管理端暂无预设，请让管理员选择预设目录");
+        return;
+      }
+      if (data.type === "PRESET_DATA") {
+        if (data.error) {
+          setMsg(data.error);
+          document.getElementById("submit-btn").disabled = true;
+          return;
+        }
+        renderPresetForm(data.preset);
+        document.getElementById("submit-btn").disabled = false;
+        setMsg("填写或替换后点击提交合成");
+        return;
+      }
+      if (data.type === "RENDER_RESULT") {
+        document.getElementById("submit-btn").disabled = false;
+        const wrap = document.getElementById("result-wrap");
+        wrap.innerHTML = "";
+        if (data.ok && data.png) {
+          const img = document.createElement("img");
+          img.alt = "合成结果";
+          img.src = data.png;
+          wrap.appendChild(img);
+          setMsg("完成");
+        } else {
+          setMsg("失败: " + (data.error || "未知错误"));
+        }
+      }
+    }
+
+    document.getElementById("login-btn").addEventListener("click", () => {
+      const adminId =
+        document.getElementById("admin-id").value.trim() || ADMIN_ID_DEFAULT;
+      const u = document.getElementById("u").value.trim();
+      const p = document.getElementById("p").value;
+      if (!u || !p) {
+        setMsg("请填写账号和密码");
+        return;
+      }
+
+      updateStatus("", "正在连接管理端…");
+      setMsg("");
+
+      if (conn) {
+        try { conn.close(); } catch (e) {}
+        conn = null;
+      }
+
+      clearPresetForm();
+      document.getElementById("preset-grid").innerHTML = "";
+      document.getElementById("submit-btn").disabled = true;
+
+      conn = peer.connect(adminId);
+
+      conn.on("open", () => {
+        updateStatus("online", "已连接，验证中…");
+        conn.send({ type: "AUTH", user: u, pass: p });
+      });
+
+      conn.on("close", () => {
+        updateStatus("error", "与管理端断开");
+        document.getElementById("work-box").style.display = "none";
+        document.getElementById("login-box").style.display = "block";
+      });
+
+      conn.on("data", onData);
+    });
+  </script>
+</body>
+</html>
