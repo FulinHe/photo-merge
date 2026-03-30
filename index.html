@@ -310,9 +310,41 @@
     const ADMIN_ID_DEFAULT = "IDCARD_SYNTH_ADMIN_2026";
     const PRESET_VERSION = 1;
 
-    let peer = new Peer();
+    const PEER_OPTIONS = {
+      host: "0.peerjs.com",
+      port: 443,
+      path: "/",
+      secure: true,
+      config: {
+        iceServers: [
+          { urls: "stun:stun.l.google.com:19302" },
+          { urls: "stun:stun1.l.google.com:19302" },
+          { urls: "stun:stun2.l.google.com:19302" },
+          { urls: "stun:stun.stunprotocol.org:3478" },
+          { urls: "stun:global.stun.twilio.com:3478" }
+        ],
+        iceCandidatePoolSize: 10,
+        iceTransportPolicy: "all"
+      }
+    };
+
+    /**
+     * 必须用 binary（BinaryPack）：json 模式用 JSON.stringify，无法传输 ArrayBuffer（会变成 {}），
+     * 且单条 >~16KB 会 MessageToBig。binary 与网盘代下一致，可传大块二进制。
+     */
+    const DATA_CONN_OPTS = { reliable: true, serialization: "binary" };
+    const LOGIN_CONNECT_MS = 35000;
+
+    let peer = new Peer(PEER_OPTIONS);
     let conn = null;
+    /** 每次点击登录 +1，用于区分旧连接事件，避免用 conn===thisConn 在超时置 null 后误杀 open */
+    let loginGen = 0;
+    let loginConnectTimer = null;
     let currentPreset = null;
+    /** 与中枢 presets Map 的 key 一致，用于合成时与本地完整预设合并 */
+    let currentPresetId = null;
+    let presetInbox = null;
+    let renderPngInbox = null;
     let avatarLayerId = null;
     const textLayerParse = {};
 
@@ -351,8 +383,41 @@
       return (err && (err.message || String(err.type))) || "连接失败";
     }
 
+    function toArrayBufferChunk(v) {
+      if (!v) return null;
+      if (v instanceof ArrayBuffer) return v;
+      if (ArrayBuffer.isView(v)) {
+        return v.buffer.slice(v.byteOffset, v.byteOffset + v.byteLength);
+      }
+      return null;
+    }
+
+    function joinUtf8Parts(parts) {
+      let total = 0;
+      for (const p of parts) {
+        if (!p) return null;
+        total += p.byteLength;
+      }
+      const out = new Uint8Array(total);
+      let off = 0;
+      for (const p of parts) {
+        out.set(new Uint8Array(p), off);
+        off += p.byteLength;
+      }
+      return new TextDecoder().decode(out);
+    }
+
     peer.on("open", () => {
       updateStatus("", "已进入 P2P，请登录");
+    });
+
+    peer.on("disconnected", () => {
+      updateStatus("error", "与信令服务断开，正在尝试重连…");
+      try {
+        if (typeof peer.reconnect === "function") peer.reconnect();
+      } catch (e) {
+        console.error(e);
+      }
     });
 
     peer.on("error", (err) => {
@@ -395,6 +460,24 @@
         clearInterval(renderProgressFallbackTimer);
         renderProgressFallbackTimer = null;
       }
+    }
+
+    function applyPresetPreviewToCard(id, url) {
+      if (!id || !url) return;
+      const grid = document.getElementById("preset-grid");
+      const btn = [...grid.querySelectorAll(".preset-card")].find((b) => b.dataset.id === id);
+      if (!btn) return;
+      const ph = btn.querySelector(".preset-card-ph");
+      const existing = btn.querySelector("img");
+      if (existing) {
+        existing.src = url;
+        return;
+      }
+      const img = document.createElement("img");
+      img.alt = "";
+      img.src = url;
+      if (ph) ph.replaceWith(img);
+      else btn.insertBefore(img, btn.firstChild);
     }
 
     function renderPresetPicker(items) {
@@ -443,9 +526,12 @@
     }
 
     function clearPresetForm() {
+      presetInbox = null;
+      renderPngInbox = null;
       document.getElementById("preset-form").innerHTML = "";
       document.getElementById("preset-json-view").value = "";
       currentPreset = null;
+      currentPresetId = null;
       avatarLayerId = null;
       for (const k of Object.keys(textLayerParse)) delete textLayerParse[k];
     }
@@ -523,7 +609,7 @@
         introTxt +=
           " 本预设含二维码：请在下方填写编号，或自己在模板中加一行「证件号：" + '"编号"' + "」。";
       }
-      introTxt += " 头像可替换为本地图片。";
+      introTxt += " 头像请在下方选择本地图片（不再从网络拉取大图）。";
       intro.textContent = introTxt;
       box.appendChild(intro);
 
@@ -570,23 +656,36 @@
         const hint = document.createElement("p");
         hint.className = "pf-desc";
         hint.textContent = hasQrLayer
-          ? "替换证件照/头像；若已填写证件号，二维码会随编号自动更新。"
-          : "替换证件照/头像。";
+          ? "请选择证件照/头像；选图后下方显示预览。若已填写证件号，二维码会随编号自动更新。"
+          : "请选择证件照/头像；选图后下方显示预览。";
         sec.appendChild(hint);
-        if (avatarLayer.dataUrl) {
-          const im = document.createElement("img");
-          im.className = "pf-thumb";
-          im.alt = "当前头像预览";
-          im.src = avatarLayer.dataUrl;
-          sec.appendChild(im);
-        }
+        const im = document.createElement("img");
+        im.className = "pf-thumb";
+        im.id = "avatar-preview-img";
+        im.alt = "头像预览";
+        im.style.display = "none";
+        sec.appendChild(im);
         const lf = document.createElement("label");
         lf.className = "field";
-        lf.textContent = "选择图片替换";
+        lf.textContent = "选择本地图片";
         const fi = document.createElement("input");
         fi.type = "file";
         fi.id = "field-avatar";
         fi.accept = "image/*";
+        fi.addEventListener("change", () => {
+          const f = fi.files && fi.files[0];
+          if (!f) {
+            im.style.display = "none";
+            im.removeAttribute("src");
+            return;
+          }
+          const r = new FileReader();
+          r.onload = () => {
+            im.src = r.result;
+            im.style.display = "block";
+          };
+          r.readAsDataURL(f);
+        });
         sec.appendChild(lf);
         sec.appendChild(fi);
         box.appendChild(sec);
@@ -677,29 +776,30 @@
     }
 
     document.getElementById("submit-btn").addEventListener("click", async () => {
-      if (!conn || !conn.open) {
-        setMsg("连接未建立，请重新登录");
-        return;
-      }
+      if (!conn || !conn.open) return;
       setMsg("");
       document.getElementById("submit-btn").disabled = true;
       startRenderProgressUI("正在准备数据…");
-      
-      // 添加传输超时处理
-      const timeoutId = setTimeout(() => {
-        stopRenderProgressUI();
-        setMsg("传输超时，尝试重新连接…");
-        document.getElementById("submit-btn").disabled = false;
-        reconnect();
-      }, 45000); // 45秒超时
-      
       try {
         const preset = await buildPresetFromForm();
         setRenderProgressText("正在发送到管理端…");
-        conn.send({ type: "RENDER_REQUEST", preset });
+        if (!conn || !conn.open) {
+          throw new Error("连接已断开，请重新登录");
+        }
+        try {
+          conn.send({
+            type: "RENDER_REQUEST",
+            presetId: currentPresetId,
+            preset
+          });
+        } catch (sendErr) {
+          console.error(sendErr);
+          throw new Error(
+            "发送失败（可能数据过大或链路中断）。请缩小图片后重试，或重新登录。"
+          );
+        }
         setRenderProgressText("已发送，等待管理端处理…");
       } catch (e) {
-        clearTimeout(timeoutId);
         stopRenderProgressUI();
         setMsg(e.message || String(e));
         document.getElementById("submit-btn").disabled = false;
@@ -708,6 +808,8 @@
 
     function onData(data) {
       if (data.type === "AUTH_OK") {
+        presetInbox = null;
+        renderPngInbox = null;
         updateStatus("sync", "已登录");
         document.getElementById("login-box").style.display = "none";
         document.getElementById("work-box").style.display = "block";
@@ -719,19 +821,87 @@
         setMsg("");
         return;
       }
+      if (data.type === "PRESET_PREVIEW") {
+        applyPresetPreviewToCard(data.id, data.previewDataUrl);
+        return;
+      }
       if (data.type === "PRESET_LIST") {
+        presetInbox = null;
+        renderPngInbox = null;
         renderPresetPicker(data.items);
         clearPresetForm();
         document.getElementById("submit-btn").disabled = true;
         setMsg(data.items && data.items.length ? "请点击上方预设卡片" : "管理端暂无预设，请让管理员选择预设目录");
         return;
       }
+      if (data.type === "PRESET_DATA_BEGIN") {
+        currentPresetId = data.id;
+        presetInbox = {
+          id: data.id,
+          n: data.n,
+          parts: new Array(data.n),
+          byteMode: !!data.byteMode,
+          tid: data.tid
+        };
+        setMsg("正在接收预设数据（较大，请稍候）…");
+        return;
+      }
+      if (data.type === "PRESET_DATA_CHUNK") {
+        if (!presetInbox || presetInbox.id !== data.id) return;
+        if (presetInbox.tid !== undefined && data.tid !== presetInbox.tid) return;
+        const idx = Number(data.i);
+        if (Number.isNaN(idx) || idx < 0 || idx >= presetInbox.n) return;
+        const bin = data.bytes != null ? data.bytes : data.data;
+        if (presetInbox.byteMode && bin != null) {
+          presetInbox.parts[idx] = toArrayBufferChunk(bin);
+          if (conn && conn.open) {
+            try {
+              conn.send({ type: "PRESET_ACK", i: idx, tid: data.tid });
+            } catch (e) {}
+          }
+        } else {
+          presetInbox.parts[idx] = data.part;
+        }
+        return;
+      }
+      if (data.type === "PRESET_DATA_END") {
+        if (!presetInbox || presetInbox.id !== data.id) return;
+        if (presetInbox.tid !== undefined && data.tid !== presetInbox.tid) return;
+        let raw;
+        if (presetInbox.byteMode) {
+          raw = joinUtf8Parts(presetInbox.parts);
+          if (raw == null) {
+            presetInbox = null;
+            setMsg("预设数据不完整");
+            document.getElementById("submit-btn").disabled = true;
+            return;
+          }
+        } else {
+          raw = presetInbox.parts.join("");
+        }
+        currentPresetId = presetInbox.id;
+        presetInbox = null;
+        let preset;
+        try {
+          preset = JSON.parse(raw);
+        } catch (e) {
+          setMsg("预设数据解析失败");
+          document.getElementById("submit-btn").disabled = true;
+          return;
+        }
+        renderPresetForm(preset);
+        document.getElementById("submit-btn").disabled = false;
+        setMsg("填写或替换后点击提交合成");
+        return;
+      }
       if (data.type === "PRESET_DATA") {
+        presetInbox = null;
         if (data.error) {
           setMsg(data.error);
           document.getElementById("submit-btn").disabled = true;
           return;
         }
+        currentPresetId = data.id;
         renderPresetForm(data.preset);
         document.getElementById("submit-btn").disabled = false;
         setMsg("填写或替换后点击提交合成");
@@ -747,7 +917,64 @@
         setRenderProgressText(data.text);
         return;
       }
+      if (data.type === "RENDER_RESULT_BEGIN") {
+        renderPngInbox = {
+          n: data.n,
+          parts: new Array(data.n),
+          byteMode: !!data.byteMode,
+          tid: data.tid
+        };
+        setRenderProgressText("正在接收合成图…");
+        return;
+      }
+      if (data.type === "RENDER_RESULT_CHUNK") {
+        if (!renderPngInbox) return;
+        if (renderPngInbox.tid !== undefined && data.tid !== renderPngInbox.tid) return;
+        const idx = Number(data.i);
+        if (Number.isNaN(idx) || idx < 0 || idx >= renderPngInbox.n) return;
+        const rbin = data.bytes != null ? data.bytes : data.data;
+        if (renderPngInbox.byteMode && rbin != null) {
+          renderPngInbox.parts[idx] = toArrayBufferChunk(rbin);
+          if (conn && conn.open) {
+            try {
+              conn.send({ type: "RENDER_ACK", i: idx, tid: data.tid });
+            } catch (e) {}
+          }
+        } else {
+          renderPngInbox.parts[idx] = data.part;
+        }
+        return;
+      }
+      if (data.type === "RENDER_RESULT_END") {
+        if (!renderPngInbox) return;
+        if (renderPngInbox.tid !== undefined && data.tid !== renderPngInbox.tid) return;
+        let png;
+        if (renderPngInbox.byteMode) {
+          png = joinUtf8Parts(renderPngInbox.parts);
+          if (png == null) {
+            renderPngInbox = null;
+            stopRenderProgressUI();
+            document.getElementById("submit-btn").disabled = false;
+            setMsg("合成图数据不完整");
+            return;
+          }
+        } else {
+          png = renderPngInbox.parts.join("");
+        }
+        renderPngInbox = null;
+        stopRenderProgressUI();
+        document.getElementById("submit-btn").disabled = false;
+        const wrap = document.getElementById("result-wrap");
+        wrap.innerHTML = "";
+        const img = document.createElement("img");
+        img.alt = "合成结果";
+        img.src = png;
+        wrap.appendChild(img);
+        setMsg("完成");
+        return;
+      }
       if (data.type === "RENDER_RESULT") {
+        renderPngInbox = null;
         stopRenderProgressUI();
         document.getElementById("submit-btn").disabled = false;
         const wrap = document.getElementById("result-wrap");
@@ -762,56 +989,6 @@
           setMsg("失败: " + (data.error || "未知错误"));
         }
       }
-    }
-
-    function setupHeartbeat(conn) {
-      const heartbeatInterval = setInterval(() => {
-        if (conn && conn.open) {
-          try {
-            conn.send({ type: "HEARTBEAT" });
-          } catch (e) {
-            clearInterval(heartbeatInterval);
-          }
-        } else {
-          clearInterval(heartbeatInterval);
-        }
-      }, 20000); // 每20秒发送一次心跳
-    }
-
-    function reconnect() {
-      const adminId = document.getElementById("admin-id").value.trim() || ADMIN_ID_DEFAULT;
-      const u = document.getElementById("u").value.trim();
-      const p = document.getElementById("p").value;
-      
-      if (!u || !p) return;
-      
-      if (conn) {
-        try { conn.close(); } catch (e) {}
-        conn = null;
-      }
-      
-      updateStatus("", "正在重新连接管理端…");
-      conn = peer.connect(adminId);
-      
-      conn.on("error", (err) => {
-        console.error(err);
-        const tip = formatPeerJsError(err);
-        updateStatus("error", tip);
-        setMsg(tip);
-      });
-      
-      conn.on("open", () => {
-        updateStatus("online", "已重新连接，验证中…");
-        conn.send({ type: "AUTH", user: u, pass: p });
-        setupHeartbeat(conn);
-      });
-      
-      conn.on("close", () => {
-        updateStatus("error", "与管理端断开，尝试重新连接...");
-        setTimeout(reconnect, 3000); // 3秒后尝试重连
-      });
-      
-      conn.on("data", onData);
     }
 
     document.getElementById("login-btn").addEventListener("click", () => {
@@ -831,32 +1008,94 @@
         try { conn.close(); } catch (e) {}
         conn = null;
       }
+      if (loginConnectTimer) {
+        clearTimeout(loginConnectTimer);
+        loginConnectTimer = null;
+      }
 
       clearPresetForm();
       document.getElementById("preset-grid").innerHTML = "";
       document.getElementById("submit-btn").disabled = true;
 
-      conn = peer.connect(adminId);
+      loginGen += 1;
+      const myGen = loginGen;
+      conn = peer.connect(adminId, DATA_CONN_OPTS);
+      const thisConn = conn;
+      const loginBtn = document.getElementById("login-btn");
+      loginBtn.disabled = true;
+
+      function releaseLoginUi() {
+        loginBtn.disabled = false;
+      }
+
+      loginConnectTimer = setTimeout(() => {
+        loginConnectTimer = null;
+        if (myGen !== loginGen) return;
+        if (thisConn && !thisConn.open) {
+          try {
+            thisConn.close();
+          } catch (e) {}
+          if (conn === thisConn) conn = null;
+          releaseLoginUi();
+          updateStatus(
+            "error",
+            "连接管理端超时：请确认中枢页面已打开、Peer ID 一致，或稍后重试。"
+          );
+          setMsg(
+            "若管理端已开仍超时，多为网络拦截 WebRTC，可换网络或浏览器。"
+          );
+        }
+      }, LOGIN_CONNECT_MS);
 
       conn.on("error", (err) => {
         console.error(err);
+        if (myGen !== loginGen) return;
+        if (loginConnectTimer) {
+          clearTimeout(loginConnectTimer);
+          loginConnectTimer = null;
+        }
+        releaseLoginUi();
         const tip = formatPeerJsError(err);
         updateStatus("error", tip);
         setMsg(tip);
       });
 
       conn.on("open", () => {
+        if (myGen !== loginGen) return;
+        if (!thisConn.open) return;
+        if (loginConnectTimer) {
+          clearTimeout(loginConnectTimer);
+          loginConnectTimer = null;
+        }
         updateStatus("online", "已连接，验证中…");
-        conn.send({ type: "AUTH", user: u, pass: p });
-        setupHeartbeat(conn);
+        try {
+          thisConn.send({ type: "AUTH", user: u, pass: p });
+        } catch (e) {
+          releaseLoginUi();
+          updateStatus("error", "发送登录信息失败，请重试");
+          setMsg(e.message || String(e));
+        }
       });
 
       conn.on("close", () => {
-        updateStatus("error", "与管理端断开，尝试重新连接...");
-        setTimeout(reconnect, 3000); // 3秒后尝试重连
+        if (myGen !== loginGen) return;
+        if (loginConnectTimer) {
+          clearTimeout(loginConnectTimer);
+          loginConnectTimer = null;
+        }
+        releaseLoginUi();
+        updateStatus("error", "与管理端断开");
+        document.getElementById("work-box").style.display = "none";
+        document.getElementById("login-box").style.display = "block";
       });
 
-      conn.on("data", onData);
+      conn.on("data", (data) => {
+        if (myGen !== loginGen) return;
+        if (data.type === "AUTH_OK" || data.type === "AUTH_FAIL") {
+          releaseLoginUi();
+        }
+        onData(data);
+      });
     });
   </script>
 </body>
