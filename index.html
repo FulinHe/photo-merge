@@ -331,13 +331,34 @@
       statusDot.className = "dot " + state;
     }
 
+    function formatPeerJsError(err) {
+      const t = err && err.type;
+      if (t === "peer-unavailable") {
+        return "找不到管理端：请在本机先打开 admin-p2p.html（并保持页面不关），中枢 Peer ID 须与用户端一致。";
+      }
+      if (t === "network" || t === "socket-error") {
+        return "无法连接 PeerJS 信令服务：检查网络、代理或防火墙，或稍后重试。";
+      }
+      if (t === "disconnected" || t === "socket-closed") {
+        return "与 P2P 服务断开，请刷新页面后重试。";
+      }
+      if (t === "invalid-id") {
+        return "中枢 ID 无效，请展开「高级」检查或与管理端约定一致。";
+      }
+      if (t === "webrtc-error" || t === "browser-incompatible") {
+        return "浏览器 WebRTC 受限：换 Chrome/Edge 最新版，或关闭禁用 WebRTC 的插件。";
+      }
+      return (err && (err.message || String(err.type))) || "连接失败";
+    }
+
     peer.on("open", () => {
       updateStatus("", "已进入 P2P，请登录");
     });
 
     peer.on("error", (err) => {
-      updateStatus("error", "网络错误");
       console.error(err);
+      updateStatus("error", formatPeerJsError(err));
+      setMsg(formatPeerJsError(err));
     });
 
     function setMsg(t) {
@@ -753,6 +774,13 @@
       document.getElementById("submit-btn").disabled = true;
 
       conn = peer.connect(adminId);
+
+      conn.on("error", (err) => {
+        console.error(err);
+        const tip = formatPeerJsError(err);
+        updateStatus("error", tip);
+        setMsg(tip);
+      });
 
       conn.on("open", () => {
         updateStatus("online", "已连接，验证中…");
