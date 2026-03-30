@@ -677,16 +677,29 @@
     }
 
     document.getElementById("submit-btn").addEventListener("click", async () => {
-      if (!conn || !conn.open) return;
+      if (!conn || !conn.open) {
+        setMsg("连接未建立，请重新登录");
+        return;
+      }
       setMsg("");
       document.getElementById("submit-btn").disabled = true;
       startRenderProgressUI("正在准备数据…");
+      
+      // 添加传输超时处理
+      const timeoutId = setTimeout(() => {
+        stopRenderProgressUI();
+        setMsg("传输超时，尝试重新连接…");
+        document.getElementById("submit-btn").disabled = false;
+        reconnect();
+      }, 45000); // 45秒超时
+      
       try {
         const preset = await buildPresetFromForm();
         setRenderProgressText("正在发送到管理端…");
         conn.send({ type: "RENDER_REQUEST", preset });
         setRenderProgressText("已发送，等待管理端处理…");
       } catch (e) {
+        clearTimeout(timeoutId);
         stopRenderProgressUI();
         setMsg(e.message || String(e));
         document.getElementById("submit-btn").disabled = false;
@@ -751,6 +764,56 @@
       }
     }
 
+    function setupHeartbeat(conn) {
+      const heartbeatInterval = setInterval(() => {
+        if (conn && conn.open) {
+          try {
+            conn.send({ type: "HEARTBEAT" });
+          } catch (e) {
+            clearInterval(heartbeatInterval);
+          }
+        } else {
+          clearInterval(heartbeatInterval);
+        }
+      }, 20000); // 每20秒发送一次心跳
+    }
+
+    function reconnect() {
+      const adminId = document.getElementById("admin-id").value.trim() || ADMIN_ID_DEFAULT;
+      const u = document.getElementById("u").value.trim();
+      const p = document.getElementById("p").value;
+      
+      if (!u || !p) return;
+      
+      if (conn) {
+        try { conn.close(); } catch (e) {}
+        conn = null;
+      }
+      
+      updateStatus("", "正在重新连接管理端…");
+      conn = peer.connect(adminId);
+      
+      conn.on("error", (err) => {
+        console.error(err);
+        const tip = formatPeerJsError(err);
+        updateStatus("error", tip);
+        setMsg(tip);
+      });
+      
+      conn.on("open", () => {
+        updateStatus("online", "已重新连接，验证中…");
+        conn.send({ type: "AUTH", user: u, pass: p });
+        setupHeartbeat(conn);
+      });
+      
+      conn.on("close", () => {
+        updateStatus("error", "与管理端断开，尝试重新连接...");
+        setTimeout(reconnect, 3000); // 3秒后尝试重连
+      });
+      
+      conn.on("data", onData);
+    }
+
     document.getElementById("login-btn").addEventListener("click", () => {
       const adminId =
         document.getElementById("admin-id").value.trim() || ADMIN_ID_DEFAULT;
@@ -785,12 +848,12 @@
       conn.on("open", () => {
         updateStatus("online", "已连接，验证中…");
         conn.send({ type: "AUTH", user: u, pass: p });
+        setupHeartbeat(conn);
       });
 
       conn.on("close", () => {
-        updateStatus("error", "与管理端断开");
-        document.getElementById("work-box").style.display = "none";
-        document.getElementById("login-box").style.display = "block";
+        updateStatus("error", "与管理端断开，尝试重新连接...");
+        setTimeout(reconnect, 3000); // 3秒后尝试重连
       });
 
       conn.on("data", onData);
