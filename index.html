@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>证件合成 — 用户端</title>
+  <title>图片合成 — 用户端</title>
   <script src="https://cdn.jsdelivr.net/npm/peerjs@1.5.2/dist/peerjs.min.js"></script>
   <style>
     :root {
@@ -235,10 +235,10 @@
     }
     .progress-fill {
       height: 100%;
-      width: 35%;
+      width: 0%;
       border-radius: 999px;
       background: linear-gradient(90deg, var(--p), #818cf8);
-      transition: transform 0.2s;
+      transition: width 0.15s ease;
     }
     .progress-fill.indeterminate {
       animation: progressIndet 1.2s ease-in-out infinite;
@@ -334,6 +334,12 @@
      */
     const DATA_CONN_OPTS = { reliable: true, serialization: "binary" };
     const LOGIN_CONNECT_MS = 35000;
+    /** 用户 → 管理端：大 JSON 分片（与中枢 BIN_CHUNK 同量级） */
+    const RENDER_UPLOAD_CHUNK = 256 * 1024;
+    const SMALL_RENDER_UPLOAD = 64 * 1024;
+    let renderReqUploadSeq = 0;
+    /** 上传合成请求分片时：{ tid, n, lastAck }，与 RENDER_REQ_ACK 同步 */
+    let renderReqUploadState = null;
 
     let peer = new Peer(PEER_OPTIONS);
     let conn = null;
@@ -407,6 +413,49 @@
       return new TextDecoder().decode(out);
     }
 
+    async function sendRenderRequestToAdmin(conn, presetId, preset) {
+      const json = JSON.stringify({ presetId, preset });
+      const enc = new TextEncoder();
+      const bytes = enc.encode(json);
+      if (bytes.byteLength <= SMALL_RENDER_UPLOAD) {
+        conn.send({ type: "RENDER_REQUEST", presetId, preset });
+        return;
+      }
+      const tid = ++renderReqUploadSeq;
+      const n = Math.ceil(bytes.byteLength / RENDER_UPLOAD_CHUNK);
+      renderReqUploadState = { tid, n, lastAck: -1 };
+      conn.send({
+        type: "RENDER_REQ_BEGIN",
+        tid,
+        n,
+        byteLen: bytes.byteLength
+      });
+      setProgressDeterminate(0, "正在上传合成请求 0/" + n + " 片");
+      const buf = bytes.buffer;
+      const base = bytes.byteOffset;
+      const len = bytes.byteLength;
+      let chunkIdx = 0;
+      for (let off = 0; off < len; off += RENDER_UPLOAD_CHUNK) {
+        while (
+          renderReqUploadState &&
+          renderReqUploadState.tid === tid &&
+          chunkIdx - renderReqUploadState.lastAck > 12
+        ) {
+          await new Promise((r) => setTimeout(r, 10));
+        }
+        if (!conn || !conn.open) {
+          renderReqUploadState = null;
+          throw new Error("连接已断开，请重新登录");
+        }
+        const end = Math.min(off + RENDER_UPLOAD_CHUNK, len);
+        const slice = buf.slice(base + off, base + end);
+        conn.send({ type: "RENDER_REQ_CHUNK", tid, i: chunkIdx, bytes: slice });
+        chunkIdx++;
+      }
+      conn.send({ type: "RENDER_REQ_END", tid });
+      renderReqUploadState = null;
+    }
+
     peer.on("open", () => {
       updateStatus("", "已进入 P2P，请登录");
     });
@@ -430,15 +479,40 @@
       document.getElementById("msg").textContent = t || "";
     }
 
-    function startRenderProgressUI(initialText) {
+    /** 管理端排队/制图阶段：无分片比例，用不确定进度条 */
+    function setProgressIndeterminate(text) {
       const wrap = document.getElementById("progress-wrap");
       const fill = document.getElementById("progress-fill");
       const txt = document.getElementById("progress-text");
       wrap.classList.add("visible");
       fill.classList.add("indeterminate");
-      txt.textContent = initialText || "处理中…";
+      fill.style.width = "";
+      if (renderProgressFallbackTimer) {
+        clearInterval(renderProgressFallbackTimer);
+        renderProgressFallbackTimer = null;
+      }
+      if (text != null) txt.textContent = text;
+    }
+
+    /** 分片传输（预设/合成图 PNG）：按已收片数显示真实比例（与 PRESET_ACK/RENDER_ACK 对应） */
+    function setProgressDeterminate(pct, text) {
+      const wrap = document.getElementById("progress-wrap");
+      const fill = document.getElementById("progress-fill");
+      const txt = document.getElementById("progress-text");
+      wrap.classList.add("visible");
+      fill.classList.remove("indeterminate");
+      fill.style.width = Math.min(100, Math.max(0, pct)) + "%";
+      if (text != null) txt.textContent = text;
+      if (renderProgressFallbackTimer) {
+        clearInterval(renderProgressFallbackTimer);
+        renderProgressFallbackTimer = null;
+      }
+    }
+
+    function startRenderProgressUI(initialText) {
+      setProgressIndeterminate(initialText || "处理中…");
+      const txt = document.getElementById("progress-text");
       let i = 0;
-      if (renderProgressFallbackTimer) clearInterval(renderProgressFallbackTimer);
       renderProgressFallbackTimer = setInterval(() => {
         i = (i + 1) % renderProgressHints.length;
         txt.textContent = renderProgressHints[i];
@@ -455,6 +529,7 @@
       const txt = document.getElementById("progress-text");
       wrap.classList.remove("visible");
       fill.classList.remove("indeterminate");
+      fill.style.width = "";
       txt.textContent = "";
       if (renderProgressFallbackTimer) {
         clearInterval(renderProgressFallbackTimer);
@@ -787,20 +862,19 @@
           throw new Error("连接已断开，请重新登录");
         }
         try {
-          conn.send({
-            type: "RENDER_REQUEST",
-            presetId: currentPresetId,
-            preset
-          });
+          await sendRenderRequestToAdmin(conn, currentPresetId, preset);
         } catch (sendErr) {
           console.error(sendErr);
+          renderReqUploadState = null;
           throw new Error(
-            "发送失败（可能数据过大或链路中断）。请缩小图片后重试，或重新登录。"
+            sendErr.message ||
+              "发送失败（可能数据过大或链路中断）。请缩小图片后重试，或重新登录。"
           );
         }
         setRenderProgressText("已发送，等待管理端处理…");
       } catch (e) {
         stopRenderProgressUI();
+        renderReqUploadState = null;
         setMsg(e.message || String(e));
         document.getElementById("submit-btn").disabled = false;
       }
@@ -819,6 +893,21 @@
       if (data.type === "AUTH_FAIL") {
         updateStatus("error", "账号或密码错误");
         setMsg("");
+        return;
+      }
+      if (data.type === "RENDER_REQ_ACK") {
+        if (!renderReqUploadState || renderReqUploadState.tid !== data.tid) return;
+        const ackIdx = Number(data.i);
+        if (Number.isNaN(ackIdx)) return;
+        renderReqUploadState.lastAck = Math.max(
+          renderReqUploadState.lastAck,
+          ackIdx
+        );
+        const n = renderReqUploadState.n;
+        setProgressDeterminate(
+          ((ackIdx + 1) / n) * 100,
+          "正在上传合成请求 " + (ackIdx + 1) + "/" + n + " 片"
+        );
         return;
       }
       if (data.type === "PRESET_PREVIEW") {
@@ -843,7 +932,11 @@
           byteMode: !!data.byteMode,
           tid: data.tid
         };
-        setMsg("正在接收预设数据（较大，请稍候）…");
+        setMsg("正在接收预设数据…");
+        setProgressDeterminate(
+          0,
+          "正在接收预设 0/" + data.n + " 片"
+        );
         return;
       }
       if (data.type === "PRESET_DATA_CHUNK") {
@@ -862,6 +955,12 @@
         } else {
           presetInbox.parts[idx] = data.part;
         }
+        const n = presetInbox.n;
+        const done = idx + 1;
+        setProgressDeterminate(
+          (done / n) * 100,
+          "正在接收预设 " + done + "/" + n + " 片"
+        );
         return;
       }
       if (data.type === "PRESET_DATA_END") {
@@ -872,6 +971,7 @@
           raw = joinUtf8Parts(presetInbox.parts);
           if (raw == null) {
             presetInbox = null;
+            stopRenderProgressUI();
             setMsg("预设数据不完整");
             document.getElementById("submit-btn").disabled = true;
             return;
@@ -885,6 +985,7 @@
         try {
           preset = JSON.parse(raw);
         } catch (e) {
+          stopRenderProgressUI();
           setMsg("预设数据解析失败");
           document.getElementById("submit-btn").disabled = true;
           return;
@@ -892,6 +993,7 @@
         renderPresetForm(preset);
         document.getElementById("submit-btn").disabled = false;
         setMsg("填写或替换后点击提交合成");
+        stopRenderProgressUI();
         return;
       }
       if (data.type === "PRESET_DATA") {
@@ -905,16 +1007,11 @@
         renderPresetForm(data.preset);
         document.getElementById("submit-btn").disabled = false;
         setMsg("填写或替换后点击提交合成");
+        stopRenderProgressUI();
         return;
       }
       if (data.type === "RENDER_PROGRESS") {
-        document.getElementById("progress-wrap").classList.add("visible");
-        document.getElementById("progress-fill").classList.add("indeterminate");
-        if (renderProgressFallbackTimer) {
-          clearInterval(renderProgressFallbackTimer);
-          renderProgressFallbackTimer = null;
-        }
-        setRenderProgressText(data.text);
+        setProgressIndeterminate(data.text);
         return;
       }
       if (data.type === "RENDER_RESULT_BEGIN") {
@@ -924,7 +1021,7 @@
           byteMode: !!data.byteMode,
           tid: data.tid
         };
-        setRenderProgressText("正在接收合成图…");
+        setProgressDeterminate(0, "正在接收合成图 0/" + data.n + " 片");
         return;
       }
       if (data.type === "RENDER_RESULT_CHUNK") {
@@ -943,6 +1040,12 @@
         } else {
           renderPngInbox.parts[idx] = data.part;
         }
+        const n = renderPngInbox.n;
+        const done = idx + 1;
+        setProgressDeterminate(
+          (done / n) * 100,
+          "正在接收合成图 " + done + "/" + n + " 片"
+        );
         return;
       }
       if (data.type === "RENDER_RESULT_END") {
@@ -1083,6 +1186,7 @@
           clearTimeout(loginConnectTimer);
           loginConnectTimer = null;
         }
+        renderReqUploadState = null;
         releaseLoginUi();
         updateStatus("error", "与管理端断开");
         document.getElementById("work-box").style.display = "none";
