@@ -266,8 +266,8 @@
       </div>
     </div>
 
-    <h3>证件合成 · 用户端</h3>
-    <p class="sub">选择预设后，只需填写引号内的文字，并可选替换头像图（头像.png）。</p>
+    <h3>图片合成 · 用户端</h3>
+    <p class="sub">选择预设后，仅可改「标签：」后面的文字（冒号后），以及替换与「头像.png」对应的头像图。</p>
 
     <div id="login-box">
       <input type="text" id="u" placeholder="账号" autocomplete="username" />
@@ -349,10 +349,11 @@
     let currentPreset = null;
     /** 与中枢 presets Map 的 key 一致，用于合成时与本地完整预设合并 */
     let currentPresetId = null;
+    /** 用户最后一次点击卡片请求的预设 id；忽略链路上仍排队中的其它预设，避免「选中 A 却显示 B」 */
+    let lastRequestedPresetId = null;
     let presetInbox = null;
     let renderPngInbox = null;
     let avatarLayerId = null;
-    const textLayerParse = {};
 
     let renderProgressFallbackTimer = null;
     const renderProgressHints = [
@@ -582,6 +583,7 @@
             c.classList.toggle("selected", c === btn);
           });
           clearPresetForm();
+          lastRequestedPresetId = it.id;
           document.getElementById("submit-btn").disabled = true;
           if (!conn || !conn.open) return;
           setMsg("正在拉取预设…");
@@ -608,7 +610,6 @@
       currentPreset = null;
       currentPresetId = null;
       avatarLayerId = null;
-      for (const k of Object.keys(textLayerParse)) delete textLayerParse[k];
     }
 
     /**
@@ -639,13 +640,31 @@
       return parsed.prefix + v;
     }
 
+    function avatarLayerStemHint(layer) {
+      const raw = (layer && (layer.fileName || layer.name || layer.label || "")) + "";
+      const base = raw.split(/[/\\]/).pop() || raw;
+      return base.replace(/\.(png|jpg|jpeg|webp|gif)$/i, "").toLowerCase();
+    }
+
+    /**
+     * 仅识别制图导出时写入的 fileName（如 头像.png）：去扩展名后必须等于「头像」。
+     * 不用画布坐标猜测，避免换错图层。
+     */
+    function resolveAvatarLayer(images) {
+      const list = (images || []).filter((x) => x.type === "image");
+      const nonQr = list.filter((x) => !x.isQrLayer);
+      for (const x of nonQr) {
+        if (avatarLayerStemHint(x) === "头像") return x;
+      }
+      return null;
+    }
+
     function renderPresetForm(preset) {
       const box = document.getElementById("preset-form");
       const jsonView = document.getElementById("preset-json-view");
       box.innerHTML = "";
       jsonView.value = "";
       avatarLayerId = null;
-      for (const k of Object.keys(textLayerParse)) delete textLayerParse[k];
 
       if (!preset || preset.version !== PRESET_VERSION) {
         const p = document.createElement("p");
@@ -662,7 +681,7 @@
       const layers = preset.layers || [];
       const texts = layers.filter((x) => x.type === "text");
       const images = layers.filter((x) => x.type === "image");
-      const avatarLayer = images.find((x) => !x.isQrLayer) || null;
+      const avatarLayer = resolveAvatarLayer(images);
       const hasQrLayer = images.some((x) => x.isQrLayer);
       const hasCertTextLine = texts.some((layer) => {
         const pr = parseQuotedAfterColon(layer.text);
@@ -676,7 +695,7 @@
       intro.className = "pf-desc";
       intro.style.marginTop = "4px";
       let introTxt =
-        "模板里请使用「标签：" + '"填写内容"' + "」这种写法；此处只填引号里的字。";
+        "仅支持含中文或英文冒号的文字行（「标签：" + '"填写内容"' + "」）；此处只改冒号后的内容。";
       if (hasQrLayer && hasCertTextLine) {
         introTxt +=
           " 含「证件号」或「证件编号」行时，引号内的编号会在合成时自动写入二维码。";
@@ -688,31 +707,30 @@
       intro.textContent = introTxt;
       box.appendChild(intro);
 
-      if (texts.length) {
+      let colSlot = 0;
+      const editableTexts = texts.filter((layer) => {
+        return parseQuotedAfterColon(layer.text).mode === "edit";
+      });
+      if (editableTexts.length) {
         const sec = document.createElement("div");
         sec.className = "pf-section";
         const h = document.createElement("h4");
         h.className = "pf-h";
-        h.textContent = "文字（引号内）";
+        h.textContent = "文字（冒号后，引号内）";
         sec.appendChild(h);
-        texts.forEach((layer) => {
+        editableTexts.forEach((layer) => {
           const parsed = parseQuotedAfterColon(layer.text);
-          textLayerParse[layer.id] = parsed;
-
           const wrap = document.createElement("div");
           wrap.className = "pf-layer";
           const title = document.createElement("div");
           title.className = "pf-layer-title";
-          if (parsed.mode === "edit") {
-            title.textContent = parsed.title;
-          } else {
-            title.textContent = "整段文字（本行无冒号分隔，可整段修改）";
-          }
+          title.textContent = parsed.title;
           const ta = document.createElement("textarea");
           ta.className = "field-text";
-          ta.id = "field-text-" + layer.id;
-          ta.value = parsed.mode === "full" ? parsed.full : parsed.value;
-          ta.rows = parsed.mode === "full" ? 4 : 2;
+          ta.id = "field-text-col-" + colSlot;
+          colSlot += 1;
+          ta.value = parsed.value;
+          ta.rows = 2;
           wrap.appendChild(title);
           wrap.appendChild(ta);
           sec.appendChild(wrap);
@@ -769,7 +787,8 @@
         sec.className = "pf-section";
         const p = document.createElement("p");
         p.className = "pf-desc";
-        p.textContent = "当前预设只有二维码等图片层，没有可作为头像替换的照片图层。";
+        p.textContent =
+          "当前预设里没有标记为「头像.png」的图片图层（JSON 需含 fileName）。请在制图页用「添加图片」选择文件名为 头像.png 的图片，导出预设后再加载；或中枢仅含一张非二维码照片时，与 头像.png 同目录可自动补全。";
         sec.appendChild(p);
         box.appendChild(sec);
       }
@@ -798,7 +817,7 @@
       }
 
       const canSubmitSomething =
-        texts.length > 0 || avatarLayer || hasQrLayer;
+        editableTexts.length > 0 || avatarLayer || hasQrLayer;
       if (!canSubmitSomething) {
         const sec = document.createElement("div");
         sec.className = "pf-section";
@@ -814,12 +833,16 @@
       if (!currentPreset) throw new Error("未加载预设");
       const p = JSON.parse(JSON.stringify(currentPreset));
 
+      let colSlot = 0;
       for (const layer of p.layers || []) {
         if (layer.type === "text") {
-          const te = document.getElementById("field-text-" + layer.id);
-          const parsed = textLayerParse[layer.id];
-          if (te && parsed) {
-            layer.text = rebuildQuotedAfterColon(parsed, te.value);
+          const parsed = parseQuotedAfterColon(layer.text);
+          if (parsed.mode === "edit") {
+            const te = document.getElementById("field-text-col-" + colSlot);
+            colSlot += 1;
+            if (te && parsed) {
+              layer.text = rebuildQuotedAfterColon(parsed, te.value);
+            }
           }
         }
         if (layer.type === "image" && avatarLayerId && layer.id === avatarLayerId) {
@@ -831,11 +854,14 @@
       }
 
       p.ui = p.ui || {};
+      colSlot = 0;
       for (const layer of p.layers || []) {
         if (layer.type !== "text") continue;
-        const te = document.getElementById("field-text-" + layer.id);
-        const parsed = textLayerParse[layer.id];
-        if (!te || !parsed || parsed.mode !== "edit") continue;
+        const parsed = parseQuotedAfterColon(layer.text);
+        if (parsed.mode !== "edit") continue;
+        const te = document.getElementById("field-text-col-" + colSlot);
+        colSlot += 1;
+        if (!te || !parsed) continue;
         const t = String(parsed.title || "").replace(/\s/g, "");
         if (t === "证件号" || t === "证件编号") {
           p.ui.certId = String(te.value || "").trim();
@@ -917,6 +943,7 @@
       if (data.type === "PRESET_LIST") {
         presetInbox = null;
         renderPngInbox = null;
+        lastRequestedPresetId = null;
         renderPresetPicker(data.items);
         clearPresetForm();
         document.getElementById("submit-btn").disabled = true;
@@ -924,6 +951,7 @@
         return;
       }
       if (data.type === "PRESET_DATA_BEGIN") {
+        if (data.id !== lastRequestedPresetId) return;
         currentPresetId = data.id;
         presetInbox = {
           id: data.id,
@@ -966,6 +994,11 @@
       if (data.type === "PRESET_DATA_END") {
         if (!presetInbox || presetInbox.id !== data.id) return;
         if (presetInbox.tid !== undefined && data.tid !== presetInbox.tid) return;
+        if (data.id !== lastRequestedPresetId) {
+          presetInbox = null;
+          stopRenderProgressUI();
+          return;
+        }
         let raw;
         if (presetInbox.byteMode) {
           raw = joinUtf8Parts(presetInbox.parts);
@@ -998,6 +1031,7 @@
       }
       if (data.type === "PRESET_DATA") {
         presetInbox = null;
+        if (data.id !== lastRequestedPresetId) return;
         if (data.error) {
           setMsg(data.error);
           document.getElementById("submit-btn").disabled = true;
@@ -1117,6 +1151,7 @@
       }
 
       clearPresetForm();
+      lastRequestedPresetId = null;
       document.getElementById("preset-grid").innerHTML = "";
       document.getElementById("submit-btn").disabled = true;
 
