@@ -2588,6 +2588,127 @@ var qrcode = function() {
       line-height: 1.5;
       word-break: break-word;
     }
+
+    /* ========== 手机 / 窄屏适配（与桌面版同一套 HTML，仅样式分流） ========== */
+    @media (max-width: 768px) {
+      body {
+        -webkit-text-size-adjust: 100%;
+        padding-bottom: env(safe-area-inset-bottom, 0);
+      }
+      .app {
+        grid-template-columns: 1fr !important;
+        padding: 8px;
+        gap: 10px;
+        min-height: 100dvh;
+      }
+      .app.preset-only {
+        grid-template-columns: 1fr !important;
+        align-content: stretch;
+      }
+      .app.preset-only .preset-rail {
+        min-height: auto;
+        max-height: none;
+      }
+      .preset-rail {
+        padding: 12px;
+        border-radius: 10px;
+      }
+      .preset-rail h2 {
+        font-size: 17px;
+      }
+      .rail-btns button {
+        padding: 10px 8px;
+        font-size: 13px;
+        min-height: 40px;
+      }
+      .preset-item {
+        padding: 10px 8px;
+        font-size: 13px;
+        min-height: 44px;
+      }
+      .preset-item-name {
+        font-size: 14px;
+        padding: 6px 0;
+      }
+      .main-work {
+        gap: 6px;
+        min-height: 0;
+      }
+      .mode-bar {
+        position: sticky;
+        top: 0;
+        z-index: 5;
+        background: var(--bg);
+        padding: 4px 0;
+      }
+      .mode-tab {
+        padding: 10px 16px;
+        font-size: 14px;
+        min-height: 44px;
+      }
+      .main-split {
+        display: flex;
+        flex-direction: column;
+        grid-template-columns: unset;
+        gap: 10px;
+        min-height: 0;
+      }
+      /* 窄屏：先画布预览，再表单，便于单手滚动 */
+      .main-split .canvas-wrap {
+        order: 1;
+        padding: 8px;
+        max-height: min(52vh, 420px);
+        overflow: auto;
+        -webkit-overflow-scrolling: touch;
+      }
+      .main-split aside.panel {
+        order: 2;
+        padding: 10px;
+        border-radius: 10px;
+        max-height: none;
+      }
+      #stage {
+        max-height: min(48vh, 380px);
+        width: 100% !important;
+        height: auto !important;
+        touch-action: pinch-zoom;
+      }
+      h1 {
+        font-size: 18px;
+      }
+      .panel .small {
+        font-size: 11px;
+      }
+      .row {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 4px;
+      }
+      .row label {
+        min-width: 0;
+        font-size: 13px;
+      }
+      .btns {
+        grid-template-columns: 1fr 1fr;
+        gap: 8px;
+      }
+      .btns button,
+      button {
+        padding: 10px 12px;
+        font-size: 14px;
+        min-height: 44px;
+        touch-action: manipulation;
+      }
+      .group {
+        padding: 12px;
+        margin-bottom: 12px;
+      }
+      #qrCanvas {
+        width: 160px;
+        height: 160px;
+      }
+    }
+
     html.embed-render .app {
       grid-template-columns: 1fr;
       min-height: auto;
