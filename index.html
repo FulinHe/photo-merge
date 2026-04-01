@@ -1,1240 +1,4911 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>图片合成 — 用户端</title>
-  <script src="https://cdn.jsdelivr.net/npm/peerjs@1.5.2/dist/peerjs.min.js"></script>
+  <title>模板编辑</title>
+  <script>
+//---------------------------------------------------------------------
+//
+// QR Code Generator for JavaScript
+//
+// Copyright (c) 2009 Kazuhiko Arase
+//
+// URL: http://www.d-project.com/
+//
+// Licensed under the MIT license:
+//  http://www.opensource.org/licenses/mit-license.php
+//
+// The word 'QR Code' is registered trademark of
+// DENSO WAVE INCORPORATED
+//  http://www.denso-wave.com/qrcode/faqpatent-e.html
+//
+//---------------------------------------------------------------------
+
+var qrcode = function() {
+
+  //---------------------------------------------------------------------
+  // qrcode
+  //---------------------------------------------------------------------
+
+  /**
+   * qrcode
+   * @param typeNumber 1 to 40
+   * @param errorCorrectionLevel 'L','M','Q','H'
+   */
+  var qrcode = function(typeNumber, errorCorrectionLevel) {
+
+    var PAD0 = 0xEC;
+    var PAD1 = 0x11;
+
+    var _typeNumber = typeNumber;
+    var _errorCorrectionLevel = QRErrorCorrectionLevel[errorCorrectionLevel];
+    var _modules = null;
+    var _moduleCount = 0;
+    var _dataCache = null;
+    var _dataList = [];
+
+    var _this = {};
+
+    var makeImpl = function(test, maskPattern) {
+
+      _moduleCount = _typeNumber * 4 + 17;
+      _modules = function(moduleCount) {
+        var modules = new Array(moduleCount);
+        for (var row = 0; row < moduleCount; row += 1) {
+          modules[row] = new Array(moduleCount);
+          for (var col = 0; col < moduleCount; col += 1) {
+            modules[row][col] = null;
+          }
+        }
+        return modules;
+      }(_moduleCount);
+
+      setupPositionProbePattern(0, 0);
+      setupPositionProbePattern(_moduleCount - 7, 0);
+      setupPositionProbePattern(0, _moduleCount - 7);
+      setupPositionAdjustPattern();
+      setupTimingPattern();
+      setupTypeInfo(test, maskPattern);
+
+      if (_typeNumber >= 7) {
+        setupTypeNumber(test);
+      }
+
+      if (_dataCache == null) {
+        _dataCache = createData(_typeNumber, _errorCorrectionLevel, _dataList);
+      }
+
+      mapData(_dataCache, maskPattern);
+    };
+
+    var setupPositionProbePattern = function(row, col) {
+
+      for (var r = -1; r <= 7; r += 1) {
+
+        if (row + r <= -1 || _moduleCount <= row + r) continue;
+
+        for (var c = -1; c <= 7; c += 1) {
+
+          if (col + c <= -1 || _moduleCount <= col + c) continue;
+
+          if ( (0 <= r && r <= 6 && (c == 0 || c == 6) )
+              || (0 <= c && c <= 6 && (r == 0 || r == 6) )
+              || (2 <= r && r <= 4 && 2 <= c && c <= 4) ) {
+            _modules[row + r][col + c] = true;
+          } else {
+            _modules[row + r][col + c] = false;
+          }
+        }
+      }
+    };
+
+    var getBestMaskPattern = function() {
+
+      var minLostPoint = 0;
+      var pattern = 0;
+
+      for (var i = 0; i < 8; i += 1) {
+
+        makeImpl(true, i);
+
+        var lostPoint = QRUtil.getLostPoint(_this);
+
+        if (i == 0 || minLostPoint > lostPoint) {
+          minLostPoint = lostPoint;
+          pattern = i;
+        }
+      }
+
+      return pattern;
+    };
+
+    var setupTimingPattern = function() {
+
+      for (var r = 8; r < _moduleCount - 8; r += 1) {
+        if (_modules[r][6] != null) {
+          continue;
+        }
+        _modules[r][6] = (r % 2 == 0);
+      }
+
+      for (var c = 8; c < _moduleCount - 8; c += 1) {
+        if (_modules[6][c] != null) {
+          continue;
+        }
+        _modules[6][c] = (c % 2 == 0);
+      }
+    };
+
+    var setupPositionAdjustPattern = function() {
+
+      var pos = QRUtil.getPatternPosition(_typeNumber);
+
+      for (var i = 0; i < pos.length; i += 1) {
+
+        for (var j = 0; j < pos.length; j += 1) {
+
+          var row = pos[i];
+          var col = pos[j];
+
+          if (_modules[row][col] != null) {
+            continue;
+          }
+
+          for (var r = -2; r <= 2; r += 1) {
+
+            for (var c = -2; c <= 2; c += 1) {
+
+              if (r == -2 || r == 2 || c == -2 || c == 2
+                  || (r == 0 && c == 0) ) {
+                _modules[row + r][col + c] = true;
+              } else {
+                _modules[row + r][col + c] = false;
+              }
+            }
+          }
+        }
+      }
+    };
+
+    var setupTypeNumber = function(test) {
+
+      var bits = QRUtil.getBCHTypeNumber(_typeNumber);
+
+      for (var i = 0; i < 18; i += 1) {
+        var mod = (!test && ( (bits >> i) & 1) == 1);
+        _modules[Math.floor(i / 3)][i % 3 + _moduleCount - 8 - 3] = mod;
+      }
+
+      for (var i = 0; i < 18; i += 1) {
+        var mod = (!test && ( (bits >> i) & 1) == 1);
+        _modules[i % 3 + _moduleCount - 8 - 3][Math.floor(i / 3)] = mod;
+      }
+    };
+
+    var setupTypeInfo = function(test, maskPattern) {
+
+      var data = (_errorCorrectionLevel << 3) | maskPattern;
+      var bits = QRUtil.getBCHTypeInfo(data);
+
+      // vertical
+      for (var i = 0; i < 15; i += 1) {
+
+        var mod = (!test && ( (bits >> i) & 1) == 1);
+
+        if (i < 6) {
+          _modules[i][8] = mod;
+        } else if (i < 8) {
+          _modules[i + 1][8] = mod;
+        } else {
+          _modules[_moduleCount - 15 + i][8] = mod;
+        }
+      }
+
+      // horizontal
+      for (var i = 0; i < 15; i += 1) {
+
+        var mod = (!test && ( (bits >> i) & 1) == 1);
+
+        if (i < 8) {
+          _modules[8][_moduleCount - i - 1] = mod;
+        } else if (i < 9) {
+          _modules[8][15 - i - 1 + 1] = mod;
+        } else {
+          _modules[8][15 - i - 1] = mod;
+        }
+      }
+
+      // fixed module
+      _modules[_moduleCount - 8][8] = (!test);
+    };
+
+    var mapData = function(data, maskPattern) {
+
+      var inc = -1;
+      var row = _moduleCount - 1;
+      var bitIndex = 7;
+      var byteIndex = 0;
+      var maskFunc = QRUtil.getMaskFunction(maskPattern);
+
+      for (var col = _moduleCount - 1; col > 0; col -= 2) {
+
+        if (col == 6) col -= 1;
+
+        while (true) {
+
+          for (var c = 0; c < 2; c += 1) {
+
+            if (_modules[row][col - c] == null) {
+
+              var dark = false;
+
+              if (byteIndex < data.length) {
+                dark = ( ( (data[byteIndex] >>> bitIndex) & 1) == 1);
+              }
+
+              var mask = maskFunc(row, col - c);
+
+              if (mask) {
+                dark = !dark;
+              }
+
+              _modules[row][col - c] = dark;
+              bitIndex -= 1;
+
+              if (bitIndex == -1) {
+                byteIndex += 1;
+                bitIndex = 7;
+              }
+            }
+          }
+
+          row += inc;
+
+          if (row < 0 || _moduleCount <= row) {
+            row -= inc;
+            inc = -inc;
+            break;
+          }
+        }
+      }
+    };
+
+    var createBytes = function(buffer, rsBlocks) {
+
+      var offset = 0;
+
+      var maxDcCount = 0;
+      var maxEcCount = 0;
+
+      var dcdata = new Array(rsBlocks.length);
+      var ecdata = new Array(rsBlocks.length);
+
+      for (var r = 0; r < rsBlocks.length; r += 1) {
+
+        var dcCount = rsBlocks[r].dataCount;
+        var ecCount = rsBlocks[r].totalCount - dcCount;
+
+        maxDcCount = Math.max(maxDcCount, dcCount);
+        maxEcCount = Math.max(maxEcCount, ecCount);
+
+        dcdata[r] = new Array(dcCount);
+
+        for (var i = 0; i < dcdata[r].length; i += 1) {
+          dcdata[r][i] = 0xff & buffer.getBuffer()[i + offset];
+        }
+        offset += dcCount;
+
+        var rsPoly = QRUtil.getErrorCorrectPolynomial(ecCount);
+        var rawPoly = qrPolynomial(dcdata[r], rsPoly.getLength() - 1);
+
+        var modPoly = rawPoly.mod(rsPoly);
+        ecdata[r] = new Array(rsPoly.getLength() - 1);
+        for (var i = 0; i < ecdata[r].length; i += 1) {
+          var modIndex = i + modPoly.getLength() - ecdata[r].length;
+          ecdata[r][i] = (modIndex >= 0)? modPoly.getAt(modIndex) : 0;
+        }
+      }
+
+      var totalCodeCount = 0;
+      for (var i = 0; i < rsBlocks.length; i += 1) {
+        totalCodeCount += rsBlocks[i].totalCount;
+      }
+
+      var data = new Array(totalCodeCount);
+      var index = 0;
+
+      for (var i = 0; i < maxDcCount; i += 1) {
+        for (var r = 0; r < rsBlocks.length; r += 1) {
+          if (i < dcdata[r].length) {
+            data[index] = dcdata[r][i];
+            index += 1;
+          }
+        }
+      }
+
+      for (var i = 0; i < maxEcCount; i += 1) {
+        for (var r = 0; r < rsBlocks.length; r += 1) {
+          if (i < ecdata[r].length) {
+            data[index] = ecdata[r][i];
+            index += 1;
+          }
+        }
+      }
+
+      return data;
+    };
+
+    var createData = function(typeNumber, errorCorrectionLevel, dataList) {
+
+      var rsBlocks = QRRSBlock.getRSBlocks(typeNumber, errorCorrectionLevel);
+
+      var buffer = qrBitBuffer();
+
+      for (var i = 0; i < dataList.length; i += 1) {
+        var data = dataList[i];
+        buffer.put(data.getMode(), 4);
+        buffer.put(data.getLength(), QRUtil.getLengthInBits(data.getMode(), typeNumber) );
+        data.write(buffer);
+      }
+
+      // calc num max data.
+      var totalDataCount = 0;
+      for (var i = 0; i < rsBlocks.length; i += 1) {
+        totalDataCount += rsBlocks[i].dataCount;
+      }
+
+      if (buffer.getLengthInBits() > totalDataCount * 8) {
+        throw 'code length overflow. ('
+          + buffer.getLengthInBits()
+          + '>'
+          + totalDataCount * 8
+          + ')';
+      }
+
+      // end code
+      if (buffer.getLengthInBits() + 4 <= totalDataCount * 8) {
+        buffer.put(0, 4);
+      }
+
+      // padding
+      while (buffer.getLengthInBits() % 8 != 0) {
+        buffer.putBit(false);
+      }
+
+      // padding
+      while (true) {
+
+        if (buffer.getLengthInBits() >= totalDataCount * 8) {
+          break;
+        }
+        buffer.put(PAD0, 8);
+
+        if (buffer.getLengthInBits() >= totalDataCount * 8) {
+          break;
+        }
+        buffer.put(PAD1, 8);
+      }
+
+      return createBytes(buffer, rsBlocks);
+    };
+
+    _this.addData = function(data, mode) {
+
+      mode = mode || 'Byte';
+
+      var newData = null;
+
+      switch(mode) {
+      case 'Numeric' :
+        newData = qrNumber(data);
+        break;
+      case 'Alphanumeric' :
+        newData = qrAlphaNum(data);
+        break;
+      case 'Byte' :
+        newData = qr8BitByte(data);
+        break;
+      case 'Kanji' :
+        newData = qrKanji(data);
+        break;
+      default :
+        throw 'mode:' + mode;
+      }
+
+      _dataList.push(newData);
+      _dataCache = null;
+    };
+
+    _this.isDark = function(row, col) {
+      if (row < 0 || _moduleCount <= row || col < 0 || _moduleCount <= col) {
+        throw row + ',' + col;
+      }
+      return _modules[row][col];
+    };
+
+    _this.getModuleCount = function() {
+      return _moduleCount;
+    };
+
+    _this.make = function() {
+      if (_typeNumber < 1) {
+        var typeNumber = 1;
+
+        for (; typeNumber < 40; typeNumber++) {
+          var rsBlocks = QRRSBlock.getRSBlocks(typeNumber, _errorCorrectionLevel);
+          var buffer = qrBitBuffer();
+
+          for (var i = 0; i < _dataList.length; i++) {
+            var data = _dataList[i];
+            buffer.put(data.getMode(), 4);
+            buffer.put(data.getLength(), QRUtil.getLengthInBits(data.getMode(), typeNumber) );
+            data.write(buffer);
+          }
+
+          var totalDataCount = 0;
+          for (var i = 0; i < rsBlocks.length; i++) {
+            totalDataCount += rsBlocks[i].dataCount;
+          }
+
+          if (buffer.getLengthInBits() <= totalDataCount * 8) {
+            break;
+          }
+        }
+
+        _typeNumber = typeNumber;
+      }
+
+      makeImpl(false, getBestMaskPattern() );
+    };
+
+    _this.createTableTag = function(cellSize, margin) {
+
+      cellSize = cellSize || 2;
+      margin = (typeof margin == 'undefined')? cellSize * 4 : margin;
+
+      var qrHtml = '';
+
+      qrHtml += '<table style="';
+      qrHtml += ' border-width: 0px; border-style: none;';
+      qrHtml += ' border-collapse: collapse;';
+      qrHtml += ' padding: 0px; margin: ' + margin + 'px;';
+      qrHtml += '">';
+      qrHtml += '<tbody>';
+
+      for (var r = 0; r < _this.getModuleCount(); r += 1) {
+
+        qrHtml += '<tr>';
+
+        for (var c = 0; c < _this.getModuleCount(); c += 1) {
+          qrHtml += '<td style="';
+          qrHtml += ' border-width: 0px; border-style: none;';
+          qrHtml += ' border-collapse: collapse;';
+          qrHtml += ' padding: 0px; margin: 0px;';
+          qrHtml += ' width: ' + cellSize + 'px;';
+          qrHtml += ' height: ' + cellSize + 'px;';
+          qrHtml += ' background-color: ';
+          qrHtml += _this.isDark(r, c)? '#000000' : '#ffffff';
+          qrHtml += ';';
+          qrHtml += '"/>';
+        }
+
+        qrHtml += '</tr>';
+      }
+
+      qrHtml += '</tbody>';
+      qrHtml += '</table>';
+
+      return qrHtml;
+    };
+
+    _this.createSvgTag = function(cellSize, margin, alt, title) {
+
+      var opts = {};
+      if (typeof arguments[0] == 'object') {
+        // Called by options.
+        opts = arguments[0];
+        // overwrite cellSize and margin.
+        cellSize = opts.cellSize;
+        margin = opts.margin;
+        alt = opts.alt;
+        title = opts.title;
+      }
+
+      cellSize = cellSize || 2;
+      margin = (typeof margin == 'undefined')? cellSize * 4 : margin;
+
+      // Compose alt property surrogate
+      alt = (typeof alt === 'string') ? {text: alt} : alt || {};
+      alt.text = alt.text || null;
+      alt.id = (alt.text) ? alt.id || 'qrcode-description' : null;
+
+      // Compose title property surrogate
+      title = (typeof title === 'string') ? {text: title} : title || {};
+      title.text = title.text || null;
+      title.id = (title.text) ? title.id || 'qrcode-title' : null;
+
+      var size = _this.getModuleCount() * cellSize + margin * 2;
+      var c, mc, r, mr, qrSvg='', rect;
+
+      rect = 'l' + cellSize + ',0 0,' + cellSize +
+        ' -' + cellSize + ',0 0,-' + cellSize + 'z ';
+
+      qrSvg += '<svg version="1.1" xmlns="http://www.w3.org/2000/svg"';
+      qrSvg += !opts.scalable ? ' width="' + size + 'px" height="' + size + 'px"' : '';
+      qrSvg += ' viewBox="0 0 ' + size + ' ' + size + '" ';
+      qrSvg += ' preserveAspectRatio="xMinYMin meet"';
+      qrSvg += (title.text || alt.text) ? ' role="img" aria-labelledby="' +
+          escapeXml([title.id, alt.id].join(' ').trim() ) + '"' : '';
+      qrSvg += '>';
+      qrSvg += (title.text) ? '<title id="' + escapeXml(title.id) + '">' +
+          escapeXml(title.text) + '</title>' : '';
+      qrSvg += (alt.text) ? '<description id="' + escapeXml(alt.id) + '">' +
+          escapeXml(alt.text) + '</description>' : '';
+      qrSvg += '<rect width="100%" height="100%" fill="white" cx="0" cy="0"/>';
+      qrSvg += '<path d="';
+
+      for (r = 0; r < _this.getModuleCount(); r += 1) {
+        mr = r * cellSize + margin;
+        for (c = 0; c < _this.getModuleCount(); c += 1) {
+          if (_this.isDark(r, c) ) {
+            mc = c*cellSize+margin;
+            qrSvg += 'M' + mc + ',' + mr + rect;
+          }
+        }
+      }
+
+      qrSvg += '" stroke="transparent" fill="black"/>';
+      qrSvg += '</svg>';
+
+      return qrSvg;
+    };
+
+    _this.createDataURL = function(cellSize, margin) {
+
+      cellSize = cellSize || 2;
+      margin = (typeof margin == 'undefined')? cellSize * 4 : margin;
+
+      var size = _this.getModuleCount() * cellSize + margin * 2;
+      var min = margin;
+      var max = size - margin;
+
+      return createDataURL(size, size, function(x, y) {
+        if (min <= x && x < max && min <= y && y < max) {
+          var c = Math.floor( (x - min) / cellSize);
+          var r = Math.floor( (y - min) / cellSize);
+          return _this.isDark(r, c)? 0 : 1;
+        } else {
+          return 1;
+        }
+      } );
+    };
+
+    _this.createImgTag = function(cellSize, margin, alt) {
+
+      cellSize = cellSize || 2;
+      margin = (typeof margin == 'undefined')? cellSize * 4 : margin;
+
+      var size = _this.getModuleCount() * cellSize + margin * 2;
+
+      var img = '';
+      img += '<img';
+      img += '\u0020src="';
+      img += _this.createDataURL(cellSize, margin);
+      img += '"';
+      img += '\u0020width="';
+      img += size;
+      img += '"';
+      img += '\u0020height="';
+      img += size;
+      img += '"';
+      if (alt) {
+        img += '\u0020alt="';
+        img += escapeXml(alt);
+        img += '"';
+      }
+      img += '/>';
+
+      return img;
+    };
+
+    var escapeXml = function(s) {
+      var escaped = '';
+      for (var i = 0; i < s.length; i += 1) {
+        var c = s.charAt(i);
+        switch(c) {
+        case '<': escaped += '&lt;'; break;
+        case '>': escaped += '&gt;'; break;
+        case '&': escaped += '&amp;'; break;
+        case '"': escaped += '&quot;'; break;
+        default : escaped += c; break;
+        }
+      }
+      return escaped;
+    };
+
+    var _createHalfASCII = function(margin) {
+      var cellSize = 1;
+      margin = (typeof margin == 'undefined')? cellSize * 2 : margin;
+
+      var size = _this.getModuleCount() * cellSize + margin * 2;
+      var min = margin;
+      var max = size - margin;
+
+      var y, x, r1, r2, p;
+
+      var blocks = {
+        '██': '█',
+        '█ ': '▀',
+        ' █': '▄',
+        '  ': ' '
+      };
+
+      var blocksLastLineNoMargin = {
+        '██': '▀',
+        '█ ': '▀',
+        ' █': ' ',
+        '  ': ' '
+      };
+
+      var ascii = '';
+      for (y = 0; y < size; y += 2) {
+        r1 = Math.floor((y - min) / cellSize);
+        r2 = Math.floor((y + 1 - min) / cellSize);
+        for (x = 0; x < size; x += 1) {
+          p = '█';
+
+          if (min <= x && x < max && min <= y && y < max && _this.isDark(r1, Math.floor((x - min) / cellSize))) {
+            p = ' ';
+          }
+
+          if (min <= x && x < max && min <= y+1 && y+1 < max && _this.isDark(r2, Math.floor((x - min) / cellSize))) {
+            p += ' ';
+          }
+          else {
+            p += '█';
+          }
+
+          // Output 2 characters per pixel, to create full square. 1 character per pixels gives only half width of square.
+          ascii += (margin < 1 && y+1 >= max) ? blocksLastLineNoMargin[p] : blocks[p];
+        }
+
+        ascii += '\n';
+      }
+
+      if (size % 2 && margin > 0) {
+        return ascii.substring(0, ascii.length - size - 1) + Array(size+1).join('▀');
+      }
+
+      return ascii.substring(0, ascii.length-1);
+    };
+
+    _this.createASCII = function(cellSize, margin) {
+      cellSize = cellSize || 1;
+
+      if (cellSize < 2) {
+        return _createHalfASCII(margin);
+      }
+
+      cellSize -= 1;
+      margin = (typeof margin == 'undefined')? cellSize * 2 : margin;
+
+      var size = _this.getModuleCount() * cellSize + margin * 2;
+      var min = margin;
+      var max = size - margin;
+
+      var y, x, r, p;
+
+      var white = Array(cellSize+1).join('██');
+      var black = Array(cellSize+1).join('  ');
+
+      var ascii = '';
+      var line = '';
+      for (y = 0; y < size; y += 1) {
+        r = Math.floor( (y - min) / cellSize);
+        line = '';
+        for (x = 0; x < size; x += 1) {
+          p = 1;
+
+          if (min <= x && x < max && min <= y && y < max && _this.isDark(r, Math.floor((x - min) / cellSize))) {
+            p = 0;
+          }
+
+          // Output 2 characters per pixel, to create full square. 1 character per pixels gives only half width of square.
+          line += p ? white : black;
+        }
+
+        for (r = 0; r < cellSize; r += 1) {
+          ascii += line + '\n';
+        }
+      }
+
+      return ascii.substring(0, ascii.length-1);
+    };
+
+    _this.renderTo2dContext = function(context, cellSize) {
+      cellSize = cellSize || 2;
+      var length = _this.getModuleCount();
+      for (var row = 0; row < length; row++) {
+        for (var col = 0; col < length; col++) {
+          context.fillStyle = _this.isDark(row, col) ? 'black' : 'white';
+          context.fillRect(row * cellSize, col * cellSize, cellSize, cellSize);
+        }
+      }
+    }
+
+    return _this;
+  };
+
+  //---------------------------------------------------------------------
+  // qrcode.stringToBytes
+  //---------------------------------------------------------------------
+
+  qrcode.stringToBytesFuncs = {
+    'default' : function(s) {
+      var bytes = [];
+      for (var i = 0; i < s.length; i += 1) {
+        var c = s.charCodeAt(i);
+        bytes.push(c & 0xff);
+      }
+      return bytes;
+    }
+  };
+
+  qrcode.stringToBytes = qrcode.stringToBytesFuncs['default'];
+
+  //---------------------------------------------------------------------
+  // qrcode.createStringToBytes
+  //---------------------------------------------------------------------
+
+  /**
+   * @param unicodeData base64 string of byte array.
+   * [16bit Unicode],[16bit Bytes], ...
+   * @param numChars
+   */
+  qrcode.createStringToBytes = function(unicodeData, numChars) {
+
+    // create conversion map.
+
+    var unicodeMap = function() {
+
+      var bin = base64DecodeInputStream(unicodeData);
+      var read = function() {
+        var b = bin.read();
+        if (b == -1) throw 'eof';
+        return b;
+      };
+
+      var count = 0;
+      var unicodeMap = {};
+      while (true) {
+        var b0 = bin.read();
+        if (b0 == -1) break;
+        var b1 = read();
+        var b2 = read();
+        var b3 = read();
+        var k = String.fromCharCode( (b0 << 8) | b1);
+        var v = (b2 << 8) | b3;
+        unicodeMap[k] = v;
+        count += 1;
+      }
+      if (count != numChars) {
+        throw count + ' != ' + numChars;
+      }
+
+      return unicodeMap;
+    }();
+
+    var unknownChar = '?'.charCodeAt(0);
+
+    return function(s) {
+      var bytes = [];
+      for (var i = 0; i < s.length; i += 1) {
+        var c = s.charCodeAt(i);
+        if (c < 128) {
+          bytes.push(c);
+        } else {
+          var b = unicodeMap[s.charAt(i)];
+          if (typeof b == 'number') {
+            if ( (b & 0xff) == b) {
+              // 1byte
+              bytes.push(b);
+            } else {
+              // 2bytes
+              bytes.push(b >>> 8);
+              bytes.push(b & 0xff);
+            }
+          } else {
+            bytes.push(unknownChar);
+          }
+        }
+      }
+      return bytes;
+    };
+  };
+
+  //---------------------------------------------------------------------
+  // QRMode
+  //---------------------------------------------------------------------
+
+  var QRMode = {
+    MODE_NUMBER :    1 << 0,
+    MODE_ALPHA_NUM : 1 << 1,
+    MODE_8BIT_BYTE : 1 << 2,
+    MODE_KANJI :     1 << 3
+  };
+
+  //---------------------------------------------------------------------
+  // QRErrorCorrectionLevel
+  //---------------------------------------------------------------------
+
+  var QRErrorCorrectionLevel = {
+    L : 1,
+    M : 0,
+    Q : 3,
+    H : 2
+  };
+
+  //---------------------------------------------------------------------
+  // QRMaskPattern
+  //---------------------------------------------------------------------
+
+  var QRMaskPattern = {
+    PATTERN000 : 0,
+    PATTERN001 : 1,
+    PATTERN010 : 2,
+    PATTERN011 : 3,
+    PATTERN100 : 4,
+    PATTERN101 : 5,
+    PATTERN110 : 6,
+    PATTERN111 : 7
+  };
+
+  //---------------------------------------------------------------------
+  // QRUtil
+  //---------------------------------------------------------------------
+
+  var QRUtil = function() {
+
+    var PATTERN_POSITION_TABLE = [
+      [],
+      [6, 18],
+      [6, 22],
+      [6, 26],
+      [6, 30],
+      [6, 34],
+      [6, 22, 38],
+      [6, 24, 42],
+      [6, 26, 46],
+      [6, 28, 50],
+      [6, 30, 54],
+      [6, 32, 58],
+      [6, 34, 62],
+      [6, 26, 46, 66],
+      [6, 26, 48, 70],
+      [6, 26, 50, 74],
+      [6, 30, 54, 78],
+      [6, 30, 56, 82],
+      [6, 30, 58, 86],
+      [6, 34, 62, 90],
+      [6, 28, 50, 72, 94],
+      [6, 26, 50, 74, 98],
+      [6, 30, 54, 78, 102],
+      [6, 28, 54, 80, 106],
+      [6, 32, 58, 84, 110],
+      [6, 30, 58, 86, 114],
+      [6, 34, 62, 90, 118],
+      [6, 26, 50, 74, 98, 122],
+      [6, 30, 54, 78, 102, 126],
+      [6, 26, 52, 78, 104, 130],
+      [6, 30, 56, 82, 108, 134],
+      [6, 34, 60, 86, 112, 138],
+      [6, 30, 58, 86, 114, 142],
+      [6, 34, 62, 90, 118, 146],
+      [6, 30, 54, 78, 102, 126, 150],
+      [6, 24, 50, 76, 102, 128, 154],
+      [6, 28, 54, 80, 106, 132, 158],
+      [6, 32, 58, 84, 110, 136, 162],
+      [6, 26, 54, 82, 110, 138, 166],
+      [6, 30, 58, 86, 114, 142, 170]
+    ];
+    var G15 = (1 << 10) | (1 << 8) | (1 << 5) | (1 << 4) | (1 << 2) | (1 << 1) | (1 << 0);
+    var G18 = (1 << 12) | (1 << 11) | (1 << 10) | (1 << 9) | (1 << 8) | (1 << 5) | (1 << 2) | (1 << 0);
+    var G15_MASK = (1 << 14) | (1 << 12) | (1 << 10) | (1 << 4) | (1 << 1);
+
+    var _this = {};
+
+    var getBCHDigit = function(data) {
+      var digit = 0;
+      while (data != 0) {
+        digit += 1;
+        data >>>= 1;
+      }
+      return digit;
+    };
+
+    _this.getBCHTypeInfo = function(data) {
+      var d = data << 10;
+      while (getBCHDigit(d) - getBCHDigit(G15) >= 0) {
+        d ^= (G15 << (getBCHDigit(d) - getBCHDigit(G15) ) );
+      }
+      return ( (data << 10) | d) ^ G15_MASK;
+    };
+
+    _this.getBCHTypeNumber = function(data) {
+      var d = data << 12;
+      while (getBCHDigit(d) - getBCHDigit(G18) >= 0) {
+        d ^= (G18 << (getBCHDigit(d) - getBCHDigit(G18) ) );
+      }
+      return (data << 12) | d;
+    };
+
+    _this.getPatternPosition = function(typeNumber) {
+      return PATTERN_POSITION_TABLE[typeNumber - 1];
+    };
+
+    _this.getMaskFunction = function(maskPattern) {
+
+      switch (maskPattern) {
+
+      case QRMaskPattern.PATTERN000 :
+        return function(i, j) { return (i + j) % 2 == 0; };
+      case QRMaskPattern.PATTERN001 :
+        return function(i, j) { return i % 2 == 0; };
+      case QRMaskPattern.PATTERN010 :
+        return function(i, j) { return j % 3 == 0; };
+      case QRMaskPattern.PATTERN011 :
+        return function(i, j) { return (i + j) % 3 == 0; };
+      case QRMaskPattern.PATTERN100 :
+        return function(i, j) { return (Math.floor(i / 2) + Math.floor(j / 3) ) % 2 == 0; };
+      case QRMaskPattern.PATTERN101 :
+        return function(i, j) { return (i * j) % 2 + (i * j) % 3 == 0; };
+      case QRMaskPattern.PATTERN110 :
+        return function(i, j) { return ( (i * j) % 2 + (i * j) % 3) % 2 == 0; };
+      case QRMaskPattern.PATTERN111 :
+        return function(i, j) { return ( (i * j) % 3 + (i + j) % 2) % 2 == 0; };
+
+      default :
+        throw 'bad maskPattern:' + maskPattern;
+      }
+    };
+
+    _this.getErrorCorrectPolynomial = function(errorCorrectLength) {
+      var a = qrPolynomial([1], 0);
+      for (var i = 0; i < errorCorrectLength; i += 1) {
+        a = a.multiply(qrPolynomial([1, QRMath.gexp(i)], 0) );
+      }
+      return a;
+    };
+
+    _this.getLengthInBits = function(mode, type) {
+
+      if (1 <= type && type < 10) {
+
+        // 1 - 9
+
+        switch(mode) {
+        case QRMode.MODE_NUMBER    : return 10;
+        case QRMode.MODE_ALPHA_NUM : return 9;
+        case QRMode.MODE_8BIT_BYTE : return 8;
+        case QRMode.MODE_KANJI     : return 8;
+        default :
+          throw 'mode:' + mode;
+        }
+
+      } else if (type < 27) {
+
+        // 10 - 26
+
+        switch(mode) {
+        case QRMode.MODE_NUMBER    : return 12;
+        case QRMode.MODE_ALPHA_NUM : return 11;
+        case QRMode.MODE_8BIT_BYTE : return 16;
+        case QRMode.MODE_KANJI     : return 10;
+        default :
+          throw 'mode:' + mode;
+        }
+
+      } else if (type < 41) {
+
+        // 27 - 40
+
+        switch(mode) {
+        case QRMode.MODE_NUMBER    : return 14;
+        case QRMode.MODE_ALPHA_NUM : return 13;
+        case QRMode.MODE_8BIT_BYTE : return 16;
+        case QRMode.MODE_KANJI     : return 12;
+        default :
+          throw 'mode:' + mode;
+        }
+
+      } else {
+        throw 'type:' + type;
+      }
+    };
+
+    _this.getLostPoint = function(qrcode) {
+
+      var moduleCount = qrcode.getModuleCount();
+
+      var lostPoint = 0;
+
+      // LEVEL1
+
+      for (var row = 0; row < moduleCount; row += 1) {
+        for (var col = 0; col < moduleCount; col += 1) {
+
+          var sameCount = 0;
+          var dark = qrcode.isDark(row, col);
+
+          for (var r = -1; r <= 1; r += 1) {
+
+            if (row + r < 0 || moduleCount <= row + r) {
+              continue;
+            }
+
+            for (var c = -1; c <= 1; c += 1) {
+
+              if (col + c < 0 || moduleCount <= col + c) {
+                continue;
+              }
+
+              if (r == 0 && c == 0) {
+                continue;
+              }
+
+              if (dark == qrcode.isDark(row + r, col + c) ) {
+                sameCount += 1;
+              }
+            }
+          }
+
+          if (sameCount > 5) {
+            lostPoint += (3 + sameCount - 5);
+          }
+        }
+      };
+
+      // LEVEL2
+
+      for (var row = 0; row < moduleCount - 1; row += 1) {
+        for (var col = 0; col < moduleCount - 1; col += 1) {
+          var count = 0;
+          if (qrcode.isDark(row, col) ) count += 1;
+          if (qrcode.isDark(row + 1, col) ) count += 1;
+          if (qrcode.isDark(row, col + 1) ) count += 1;
+          if (qrcode.isDark(row + 1, col + 1) ) count += 1;
+          if (count == 0 || count == 4) {
+            lostPoint += 3;
+          }
+        }
+      }
+
+      // LEVEL3
+
+      for (var row = 0; row < moduleCount; row += 1) {
+        for (var col = 0; col < moduleCount - 6; col += 1) {
+          if (qrcode.isDark(row, col)
+              && !qrcode.isDark(row, col + 1)
+              &&  qrcode.isDark(row, col + 2)
+              &&  qrcode.isDark(row, col + 3)
+              &&  qrcode.isDark(row, col + 4)
+              && !qrcode.isDark(row, col + 5)
+              &&  qrcode.isDark(row, col + 6) ) {
+            lostPoint += 40;
+          }
+        }
+      }
+
+      for (var col = 0; col < moduleCount; col += 1) {
+        for (var row = 0; row < moduleCount - 6; row += 1) {
+          if (qrcode.isDark(row, col)
+              && !qrcode.isDark(row + 1, col)
+              &&  qrcode.isDark(row + 2, col)
+              &&  qrcode.isDark(row + 3, col)
+              &&  qrcode.isDark(row + 4, col)
+              && !qrcode.isDark(row + 5, col)
+              &&  qrcode.isDark(row + 6, col) ) {
+            lostPoint += 40;
+          }
+        }
+      }
+
+      // LEVEL4
+
+      var darkCount = 0;
+
+      for (var col = 0; col < moduleCount; col += 1) {
+        for (var row = 0; row < moduleCount; row += 1) {
+          if (qrcode.isDark(row, col) ) {
+            darkCount += 1;
+          }
+        }
+      }
+
+      var ratio = Math.abs(100 * darkCount / moduleCount / moduleCount - 50) / 5;
+      lostPoint += ratio * 10;
+
+      return lostPoint;
+    };
+
+    return _this;
+  }();
+
+  //---------------------------------------------------------------------
+  // QRMath
+  //---------------------------------------------------------------------
+
+  var QRMath = function() {
+
+    var EXP_TABLE = new Array(256);
+    var LOG_TABLE = new Array(256);
+
+    // initialize tables
+    for (var i = 0; i < 8; i += 1) {
+      EXP_TABLE[i] = 1 << i;
+    }
+    for (var i = 8; i < 256; i += 1) {
+      EXP_TABLE[i] = EXP_TABLE[i - 4]
+        ^ EXP_TABLE[i - 5]
+        ^ EXP_TABLE[i - 6]
+        ^ EXP_TABLE[i - 8];
+    }
+    for (var i = 0; i < 255; i += 1) {
+      LOG_TABLE[EXP_TABLE[i] ] = i;
+    }
+
+    var _this = {};
+
+    _this.glog = function(n) {
+
+      if (n < 1) {
+        throw 'glog(' + n + ')';
+      }
+
+      return LOG_TABLE[n];
+    };
+
+    _this.gexp = function(n) {
+
+      while (n < 0) {
+        n += 255;
+      }
+
+      while (n >= 256) {
+        n -= 255;
+      }
+
+      return EXP_TABLE[n];
+    };
+
+    return _this;
+  }();
+
+  //---------------------------------------------------------------------
+  // qrPolynomial
+  //---------------------------------------------------------------------
+
+  function qrPolynomial(num, shift) {
+
+    if (typeof num.length == 'undefined') {
+      throw num.length + '/' + shift;
+    }
+
+    var _num = function() {
+      var offset = 0;
+      while (offset < num.length && num[offset] == 0) {
+        offset += 1;
+      }
+      var _num = new Array(num.length - offset + shift);
+      for (var i = 0; i < num.length - offset; i += 1) {
+        _num[i] = num[i + offset];
+      }
+      return _num;
+    }();
+
+    var _this = {};
+
+    _this.getAt = function(index) {
+      return _num[index];
+    };
+
+    _this.getLength = function() {
+      return _num.length;
+    };
+
+    _this.multiply = function(e) {
+
+      var num = new Array(_this.getLength() + e.getLength() - 1);
+
+      for (var i = 0; i < _this.getLength(); i += 1) {
+        for (var j = 0; j < e.getLength(); j += 1) {
+          num[i + j] ^= QRMath.gexp(QRMath.glog(_this.getAt(i) ) + QRMath.glog(e.getAt(j) ) );
+        }
+      }
+
+      return qrPolynomial(num, 0);
+    };
+
+    _this.mod = function(e) {
+
+      if (_this.getLength() - e.getLength() < 0) {
+        return _this;
+      }
+
+      var ratio = QRMath.glog(_this.getAt(0) ) - QRMath.glog(e.getAt(0) );
+
+      var num = new Array(_this.getLength() );
+      for (var i = 0; i < _this.getLength(); i += 1) {
+        num[i] = _this.getAt(i);
+      }
+
+      for (var i = 0; i < e.getLength(); i += 1) {
+        num[i] ^= QRMath.gexp(QRMath.glog(e.getAt(i) ) + ratio);
+      }
+
+      // recursive call
+      return qrPolynomial(num, 0).mod(e);
+    };
+
+    return _this;
+  };
+
+  //---------------------------------------------------------------------
+  // QRRSBlock
+  //---------------------------------------------------------------------
+
+  var QRRSBlock = function() {
+
+    var RS_BLOCK_TABLE = [
+
+      // L
+      // M
+      // Q
+      // H
+
+      // 1
+      [1, 26, 19],
+      [1, 26, 16],
+      [1, 26, 13],
+      [1, 26, 9],
+
+      // 2
+      [1, 44, 34],
+      [1, 44, 28],
+      [1, 44, 22],
+      [1, 44, 16],
+
+      // 3
+      [1, 70, 55],
+      [1, 70, 44],
+      [2, 35, 17],
+      [2, 35, 13],
+
+      // 4
+      [1, 100, 80],
+      [2, 50, 32],
+      [2, 50, 24],
+      [4, 25, 9],
+
+      // 5
+      [1, 134, 108],
+      [2, 67, 43],
+      [2, 33, 15, 2, 34, 16],
+      [2, 33, 11, 2, 34, 12],
+
+      // 6
+      [2, 86, 68],
+      [4, 43, 27],
+      [4, 43, 19],
+      [4, 43, 15],
+
+      // 7
+      [2, 98, 78],
+      [4, 49, 31],
+      [2, 32, 14, 4, 33, 15],
+      [4, 39, 13, 1, 40, 14],
+
+      // 8
+      [2, 121, 97],
+      [2, 60, 38, 2, 61, 39],
+      [4, 40, 18, 2, 41, 19],
+      [4, 40, 14, 2, 41, 15],
+
+      // 9
+      [2, 146, 116],
+      [3, 58, 36, 2, 59, 37],
+      [4, 36, 16, 4, 37, 17],
+      [4, 36, 12, 4, 37, 13],
+
+      // 10
+      [2, 86, 68, 2, 87, 69],
+      [4, 69, 43, 1, 70, 44],
+      [6, 43, 19, 2, 44, 20],
+      [6, 43, 15, 2, 44, 16],
+
+      // 11
+      [4, 101, 81],
+      [1, 80, 50, 4, 81, 51],
+      [4, 50, 22, 4, 51, 23],
+      [3, 36, 12, 8, 37, 13],
+
+      // 12
+      [2, 116, 92, 2, 117, 93],
+      [6, 58, 36, 2, 59, 37],
+      [4, 46, 20, 6, 47, 21],
+      [7, 42, 14, 4, 43, 15],
+
+      // 13
+      [4, 133, 107],
+      [8, 59, 37, 1, 60, 38],
+      [8, 44, 20, 4, 45, 21],
+      [12, 33, 11, 4, 34, 12],
+
+      // 14
+      [3, 145, 115, 1, 146, 116],
+      [4, 64, 40, 5, 65, 41],
+      [11, 36, 16, 5, 37, 17],
+      [11, 36, 12, 5, 37, 13],
+
+      // 15
+      [5, 109, 87, 1, 110, 88],
+      [5, 65, 41, 5, 66, 42],
+      [5, 54, 24, 7, 55, 25],
+      [11, 36, 12, 7, 37, 13],
+
+      // 16
+      [5, 122, 98, 1, 123, 99],
+      [7, 73, 45, 3, 74, 46],
+      [15, 43, 19, 2, 44, 20],
+      [3, 45, 15, 13, 46, 16],
+
+      // 17
+      [1, 135, 107, 5, 136, 108],
+      [10, 74, 46, 1, 75, 47],
+      [1, 50, 22, 15, 51, 23],
+      [2, 42, 14, 17, 43, 15],
+
+      // 18
+      [5, 150, 120, 1, 151, 121],
+      [9, 69, 43, 4, 70, 44],
+      [17, 50, 22, 1, 51, 23],
+      [2, 42, 14, 19, 43, 15],
+
+      // 19
+      [3, 141, 113, 4, 142, 114],
+      [3, 70, 44, 11, 71, 45],
+      [17, 47, 21, 4, 48, 22],
+      [9, 39, 13, 16, 40, 14],
+
+      // 20
+      [3, 135, 107, 5, 136, 108],
+      [3, 67, 41, 13, 68, 42],
+      [15, 54, 24, 5, 55, 25],
+      [15, 43, 15, 10, 44, 16],
+
+      // 21
+      [4, 144, 116, 4, 145, 117],
+      [17, 68, 42],
+      [17, 50, 22, 6, 51, 23],
+      [19, 46, 16, 6, 47, 17],
+
+      // 22
+      [2, 139, 111, 7, 140, 112],
+      [17, 74, 46],
+      [7, 54, 24, 16, 55, 25],
+      [34, 37, 13],
+
+      // 23
+      [4, 151, 121, 5, 152, 122],
+      [4, 75, 47, 14, 76, 48],
+      [11, 54, 24, 14, 55, 25],
+      [16, 45, 15, 14, 46, 16],
+
+      // 24
+      [6, 147, 117, 4, 148, 118],
+      [6, 73, 45, 14, 74, 46],
+      [11, 54, 24, 16, 55, 25],
+      [30, 46, 16, 2, 47, 17],
+
+      // 25
+      [8, 132, 106, 4, 133, 107],
+      [8, 75, 47, 13, 76, 48],
+      [7, 54, 24, 22, 55, 25],
+      [22, 45, 15, 13, 46, 16],
+
+      // 26
+      [10, 142, 114, 2, 143, 115],
+      [19, 74, 46, 4, 75, 47],
+      [28, 50, 22, 6, 51, 23],
+      [33, 46, 16, 4, 47, 17],
+
+      // 27
+      [8, 152, 122, 4, 153, 123],
+      [22, 73, 45, 3, 74, 46],
+      [8, 53, 23, 26, 54, 24],
+      [12, 45, 15, 28, 46, 16],
+
+      // 28
+      [3, 147, 117, 10, 148, 118],
+      [3, 73, 45, 23, 74, 46],
+      [4, 54, 24, 31, 55, 25],
+      [11, 45, 15, 31, 46, 16],
+
+      // 29
+      [7, 146, 116, 7, 147, 117],
+      [21, 73, 45, 7, 74, 46],
+      [1, 53, 23, 37, 54, 24],
+      [19, 45, 15, 26, 46, 16],
+
+      // 30
+      [5, 145, 115, 10, 146, 116],
+      [19, 75, 47, 10, 76, 48],
+      [15, 54, 24, 25, 55, 25],
+      [23, 45, 15, 25, 46, 16],
+
+      // 31
+      [13, 145, 115, 3, 146, 116],
+      [2, 74, 46, 29, 75, 47],
+      [42, 54, 24, 1, 55, 25],
+      [23, 45, 15, 28, 46, 16],
+
+      // 32
+      [17, 145, 115],
+      [10, 74, 46, 23, 75, 47],
+      [10, 54, 24, 35, 55, 25],
+      [19, 45, 15, 35, 46, 16],
+
+      // 33
+      [17, 145, 115, 1, 146, 116],
+      [14, 74, 46, 21, 75, 47],
+      [29, 54, 24, 19, 55, 25],
+      [11, 45, 15, 46, 46, 16],
+
+      // 34
+      [13, 145, 115, 6, 146, 116],
+      [14, 74, 46, 23, 75, 47],
+      [44, 54, 24, 7, 55, 25],
+      [59, 46, 16, 1, 47, 17],
+
+      // 35
+      [12, 151, 121, 7, 152, 122],
+      [12, 75, 47, 26, 76, 48],
+      [39, 54, 24, 14, 55, 25],
+      [22, 45, 15, 41, 46, 16],
+
+      // 36
+      [6, 151, 121, 14, 152, 122],
+      [6, 75, 47, 34, 76, 48],
+      [46, 54, 24, 10, 55, 25],
+      [2, 45, 15, 64, 46, 16],
+
+      // 37
+      [17, 152, 122, 4, 153, 123],
+      [29, 74, 46, 14, 75, 47],
+      [49, 54, 24, 10, 55, 25],
+      [24, 45, 15, 46, 46, 16],
+
+      // 38
+      [4, 152, 122, 18, 153, 123],
+      [13, 74, 46, 32, 75, 47],
+      [48, 54, 24, 14, 55, 25],
+      [42, 45, 15, 32, 46, 16],
+
+      // 39
+      [20, 147, 117, 4, 148, 118],
+      [40, 75, 47, 7, 76, 48],
+      [43, 54, 24, 22, 55, 25],
+      [10, 45, 15, 67, 46, 16],
+
+      // 40
+      [19, 148, 118, 6, 149, 119],
+      [18, 75, 47, 31, 76, 48],
+      [34, 54, 24, 34, 55, 25],
+      [20, 45, 15, 61, 46, 16]
+    ];
+
+    var qrRSBlock = function(totalCount, dataCount) {
+      var _this = {};
+      _this.totalCount = totalCount;
+      _this.dataCount = dataCount;
+      return _this;
+    };
+
+    var _this = {};
+
+    var getRsBlockTable = function(typeNumber, errorCorrectionLevel) {
+
+      switch(errorCorrectionLevel) {
+      case QRErrorCorrectionLevel.L :
+        return RS_BLOCK_TABLE[(typeNumber - 1) * 4 + 0];
+      case QRErrorCorrectionLevel.M :
+        return RS_BLOCK_TABLE[(typeNumber - 1) * 4 + 1];
+      case QRErrorCorrectionLevel.Q :
+        return RS_BLOCK_TABLE[(typeNumber - 1) * 4 + 2];
+      case QRErrorCorrectionLevel.H :
+        return RS_BLOCK_TABLE[(typeNumber - 1) * 4 + 3];
+      default :
+        return undefined;
+      }
+    };
+
+    _this.getRSBlocks = function(typeNumber, errorCorrectionLevel) {
+
+      var rsBlock = getRsBlockTable(typeNumber, errorCorrectionLevel);
+
+      if (typeof rsBlock == 'undefined') {
+        throw 'bad rs block @ typeNumber:' + typeNumber +
+            '/errorCorrectionLevel:' + errorCorrectionLevel;
+      }
+
+      var length = rsBlock.length / 3;
+
+      var list = [];
+
+      for (var i = 0; i < length; i += 1) {
+
+        var count = rsBlock[i * 3 + 0];
+        var totalCount = rsBlock[i * 3 + 1];
+        var dataCount = rsBlock[i * 3 + 2];
+
+        for (var j = 0; j < count; j += 1) {
+          list.push(qrRSBlock(totalCount, dataCount) );
+        }
+      }
+
+      return list;
+    };
+
+    return _this;
+  }();
+
+  //---------------------------------------------------------------------
+  // qrBitBuffer
+  //---------------------------------------------------------------------
+
+  var qrBitBuffer = function() {
+
+    var _buffer = [];
+    var _length = 0;
+
+    var _this = {};
+
+    _this.getBuffer = function() {
+      return _buffer;
+    };
+
+    _this.getAt = function(index) {
+      var bufIndex = Math.floor(index / 8);
+      return ( (_buffer[bufIndex] >>> (7 - index % 8) ) & 1) == 1;
+    };
+
+    _this.put = function(num, length) {
+      for (var i = 0; i < length; i += 1) {
+        _this.putBit( ( (num >>> (length - i - 1) ) & 1) == 1);
+      }
+    };
+
+    _this.getLengthInBits = function() {
+      return _length;
+    };
+
+    _this.putBit = function(bit) {
+
+      var bufIndex = Math.floor(_length / 8);
+      if (_buffer.length <= bufIndex) {
+        _buffer.push(0);
+      }
+
+      if (bit) {
+        _buffer[bufIndex] |= (0x80 >>> (_length % 8) );
+      }
+
+      _length += 1;
+    };
+
+    return _this;
+  };
+
+  //---------------------------------------------------------------------
+  // qrNumber
+  //---------------------------------------------------------------------
+
+  var qrNumber = function(data) {
+
+    var _mode = QRMode.MODE_NUMBER;
+    var _data = data;
+
+    var _this = {};
+
+    _this.getMode = function() {
+      return _mode;
+    };
+
+    _this.getLength = function(buffer) {
+      return _data.length;
+    };
+
+    _this.write = function(buffer) {
+
+      var data = _data;
+
+      var i = 0;
+
+      while (i + 2 < data.length) {
+        buffer.put(strToNum(data.substring(i, i + 3) ), 10);
+        i += 3;
+      }
+
+      if (i < data.length) {
+        if (data.length - i == 1) {
+          buffer.put(strToNum(data.substring(i, i + 1) ), 4);
+        } else if (data.length - i == 2) {
+          buffer.put(strToNum(data.substring(i, i + 2) ), 7);
+        }
+      }
+    };
+
+    var strToNum = function(s) {
+      var num = 0;
+      for (var i = 0; i < s.length; i += 1) {
+        num = num * 10 + chatToNum(s.charAt(i) );
+      }
+      return num;
+    };
+
+    var chatToNum = function(c) {
+      if ('0' <= c && c <= '9') {
+        return c.charCodeAt(0) - '0'.charCodeAt(0);
+      }
+      throw 'illegal char :' + c;
+    };
+
+    return _this;
+  };
+
+  //---------------------------------------------------------------------
+  // qrAlphaNum
+  //---------------------------------------------------------------------
+
+  var qrAlphaNum = function(data) {
+
+    var _mode = QRMode.MODE_ALPHA_NUM;
+    var _data = data;
+
+    var _this = {};
+
+    _this.getMode = function() {
+      return _mode;
+    };
+
+    _this.getLength = function(buffer) {
+      return _data.length;
+    };
+
+    _this.write = function(buffer) {
+
+      var s = _data;
+
+      var i = 0;
+
+      while (i + 1 < s.length) {
+        buffer.put(
+          getCode(s.charAt(i) ) * 45 +
+          getCode(s.charAt(i + 1) ), 11);
+        i += 2;
+      }
+
+      if (i < s.length) {
+        buffer.put(getCode(s.charAt(i) ), 6);
+      }
+    };
+
+    var getCode = function(c) {
+
+      if ('0' <= c && c <= '9') {
+        return c.charCodeAt(0) - '0'.charCodeAt(0);
+      } else if ('A' <= c && c <= 'Z') {
+        return c.charCodeAt(0) - 'A'.charCodeAt(0) + 10;
+      } else {
+        switch (c) {
+        case ' ' : return 36;
+        case '$' : return 37;
+        case '%' : return 38;
+        case '*' : return 39;
+        case '+' : return 40;
+        case '-' : return 41;
+        case '.' : return 42;
+        case '/' : return 43;
+        case ':' : return 44;
+        default :
+          throw 'illegal char :' + c;
+        }
+      }
+    };
+
+    return _this;
+  };
+
+  //---------------------------------------------------------------------
+  // qr8BitByte
+  //---------------------------------------------------------------------
+
+  var qr8BitByte = function(data) {
+
+    var _mode = QRMode.MODE_8BIT_BYTE;
+    var _data = data;
+    var _bytes = qrcode.stringToBytes(data);
+
+    var _this = {};
+
+    _this.getMode = function() {
+      return _mode;
+    };
+
+    _this.getLength = function(buffer) {
+      return _bytes.length;
+    };
+
+    _this.write = function(buffer) {
+      for (var i = 0; i < _bytes.length; i += 1) {
+        buffer.put(_bytes[i], 8);
+      }
+    };
+
+    return _this;
+  };
+
+  //---------------------------------------------------------------------
+  // qrKanji
+  //---------------------------------------------------------------------
+
+  var qrKanji = function(data) {
+
+    var _mode = QRMode.MODE_KANJI;
+    var _data = data;
+
+    var stringToBytes = qrcode.stringToBytesFuncs['SJIS'];
+    if (!stringToBytes) {
+      throw 'sjis not supported.';
+    }
+    !function(c, code) {
+      // self test for sjis support.
+      var test = stringToBytes(c);
+      if (test.length != 2 || ( (test[0] << 8) | test[1]) != code) {
+        throw 'sjis not supported.';
+      }
+    }('\u53cb', 0x9746);
+
+    var _bytes = stringToBytes(data);
+
+    var _this = {};
+
+    _this.getMode = function() {
+      return _mode;
+    };
+
+    _this.getLength = function(buffer) {
+      return ~~(_bytes.length / 2);
+    };
+
+    _this.write = function(buffer) {
+
+      var data = _bytes;
+
+      var i = 0;
+
+      while (i + 1 < data.length) {
+
+        var c = ( (0xff & data[i]) << 8) | (0xff & data[i + 1]);
+
+        if (0x8140 <= c && c <= 0x9FFC) {
+          c -= 0x8140;
+        } else if (0xE040 <= c && c <= 0xEBBF) {
+          c -= 0xC140;
+        } else {
+          throw 'illegal char at ' + (i + 1) + '/' + c;
+        }
+
+        c = ( (c >>> 8) & 0xff) * 0xC0 + (c & 0xff);
+
+        buffer.put(c, 13);
+
+        i += 2;
+      }
+
+      if (i < data.length) {
+        throw 'illegal char at ' + (i + 1);
+      }
+    };
+
+    return _this;
+  };
+
+  //=====================================================================
+  // GIF Support etc.
+  //
+
+  //---------------------------------------------------------------------
+  // byteArrayOutputStream
+  //---------------------------------------------------------------------
+
+  var byteArrayOutputStream = function() {
+
+    var _bytes = [];
+
+    var _this = {};
+
+    _this.writeByte = function(b) {
+      _bytes.push(b & 0xff);
+    };
+
+    _this.writeShort = function(i) {
+      _this.writeByte(i);
+      _this.writeByte(i >>> 8);
+    };
+
+    _this.writeBytes = function(b, off, len) {
+      off = off || 0;
+      len = len || b.length;
+      for (var i = 0; i < len; i += 1) {
+        _this.writeByte(b[i + off]);
+      }
+    };
+
+    _this.writeString = function(s) {
+      for (var i = 0; i < s.length; i += 1) {
+        _this.writeByte(s.charCodeAt(i) );
+      }
+    };
+
+    _this.toByteArray = function() {
+      return _bytes;
+    };
+
+    _this.toString = function() {
+      var s = '';
+      s += '[';
+      for (var i = 0; i < _bytes.length; i += 1) {
+        if (i > 0) {
+          s += ',';
+        }
+        s += _bytes[i];
+      }
+      s += ']';
+      return s;
+    };
+
+    return _this;
+  };
+
+  //---------------------------------------------------------------------
+  // base64EncodeOutputStream
+  //---------------------------------------------------------------------
+
+  var base64EncodeOutputStream = function() {
+
+    var _buffer = 0;
+    var _buflen = 0;
+    var _length = 0;
+    var _base64 = '';
+
+    var _this = {};
+
+    var writeEncoded = function(b) {
+      _base64 += String.fromCharCode(encode(b & 0x3f) );
+    };
+
+    var encode = function(n) {
+      if (n < 0) {
+        // error.
+      } else if (n < 26) {
+        return 0x41 + n;
+      } else if (n < 52) {
+        return 0x61 + (n - 26);
+      } else if (n < 62) {
+        return 0x30 + (n - 52);
+      } else if (n == 62) {
+        return 0x2b;
+      } else if (n == 63) {
+        return 0x2f;
+      }
+      throw 'n:' + n;
+    };
+
+    _this.writeByte = function(n) {
+
+      _buffer = (_buffer << 8) | (n & 0xff);
+      _buflen += 8;
+      _length += 1;
+
+      while (_buflen >= 6) {
+        writeEncoded(_buffer >>> (_buflen - 6) );
+        _buflen -= 6;
+      }
+    };
+
+    _this.flush = function() {
+
+      if (_buflen > 0) {
+        writeEncoded(_buffer << (6 - _buflen) );
+        _buffer = 0;
+        _buflen = 0;
+      }
+
+      if (_length % 3 != 0) {
+        // padding
+        var padlen = 3 - _length % 3;
+        for (var i = 0; i < padlen; i += 1) {
+          _base64 += '=';
+        }
+      }
+    };
+
+    _this.toString = function() {
+      return _base64;
+    };
+
+    return _this;
+  };
+
+  //---------------------------------------------------------------------
+  // base64DecodeInputStream
+  //---------------------------------------------------------------------
+
+  var base64DecodeInputStream = function(str) {
+
+    var _str = str;
+    var _pos = 0;
+    var _buffer = 0;
+    var _buflen = 0;
+
+    var _this = {};
+
+    _this.read = function() {
+
+      while (_buflen < 8) {
+
+        if (_pos >= _str.length) {
+          if (_buflen == 0) {
+            return -1;
+          }
+          throw 'unexpected end of file./' + _buflen;
+        }
+
+        var c = _str.charAt(_pos);
+        _pos += 1;
+
+        if (c == '=') {
+          _buflen = 0;
+          return -1;
+        } else if (c.match(/^\s$/) ) {
+          // ignore if whitespace.
+          continue;
+        }
+
+        _buffer = (_buffer << 6) | decode(c.charCodeAt(0) );
+        _buflen += 6;
+      }
+
+      var n = (_buffer >>> (_buflen - 8) ) & 0xff;
+      _buflen -= 8;
+      return n;
+    };
+
+    var decode = function(c) {
+      if (0x41 <= c && c <= 0x5a) {
+        return c - 0x41;
+      } else if (0x61 <= c && c <= 0x7a) {
+        return c - 0x61 + 26;
+      } else if (0x30 <= c && c <= 0x39) {
+        return c - 0x30 + 52;
+      } else if (c == 0x2b) {
+        return 62;
+      } else if (c == 0x2f) {
+        return 63;
+      } else {
+        throw 'c:' + c;
+      }
+    };
+
+    return _this;
+  };
+
+  //---------------------------------------------------------------------
+  // gifImage (B/W)
+  //---------------------------------------------------------------------
+
+  var gifImage = function(width, height) {
+
+    var _width = width;
+    var _height = height;
+    var _data = new Array(width * height);
+
+    var _this = {};
+
+    _this.setPixel = function(x, y, pixel) {
+      _data[y * _width + x] = pixel;
+    };
+
+    _this.write = function(out) {
+
+      //---------------------------------
+      // GIF Signature
+
+      out.writeString('GIF87a');
+
+      //---------------------------------
+      // Screen Descriptor
+
+      out.writeShort(_width);
+      out.writeShort(_height);
+
+      out.writeByte(0x80); // 2bit
+      out.writeByte(0);
+      out.writeByte(0);
+
+      //---------------------------------
+      // Global Color Map
+
+      // black
+      out.writeByte(0x00);
+      out.writeByte(0x00);
+      out.writeByte(0x00);
+
+      // white
+      out.writeByte(0xff);
+      out.writeByte(0xff);
+      out.writeByte(0xff);
+
+      //---------------------------------
+      // Image Descriptor
+
+      out.writeString(',');
+      out.writeShort(0);
+      out.writeShort(0);
+      out.writeShort(_width);
+      out.writeShort(_height);
+      out.writeByte(0);
+
+      //---------------------------------
+      // Local Color Map
+
+      //---------------------------------
+      // Raster Data
+
+      var lzwMinCodeSize = 2;
+      var raster = getLZWRaster(lzwMinCodeSize);
+
+      out.writeByte(lzwMinCodeSize);
+
+      var offset = 0;
+
+      while (raster.length - offset > 255) {
+        out.writeByte(255);
+        out.writeBytes(raster, offset, 255);
+        offset += 255;
+      }
+
+      out.writeByte(raster.length - offset);
+      out.writeBytes(raster, offset, raster.length - offset);
+      out.writeByte(0x00);
+
+      //---------------------------------
+      // GIF Terminator
+      out.writeString(';');
+    };
+
+    var bitOutputStream = function(out) {
+
+      var _out = out;
+      var _bitLength = 0;
+      var _bitBuffer = 0;
+
+      var _this = {};
+
+      _this.write = function(data, length) {
+
+        if ( (data >>> length) != 0) {
+          throw 'length over';
+        }
+
+        while (_bitLength + length >= 8) {
+          _out.writeByte(0xff & ( (data << _bitLength) | _bitBuffer) );
+          length -= (8 - _bitLength);
+          data >>>= (8 - _bitLength);
+          _bitBuffer = 0;
+          _bitLength = 0;
+        }
+
+        _bitBuffer = (data << _bitLength) | _bitBuffer;
+        _bitLength = _bitLength + length;
+      };
+
+      _this.flush = function() {
+        if (_bitLength > 0) {
+          _out.writeByte(_bitBuffer);
+        }
+      };
+
+      return _this;
+    };
+
+    var getLZWRaster = function(lzwMinCodeSize) {
+
+      var clearCode = 1 << lzwMinCodeSize;
+      var endCode = (1 << lzwMinCodeSize) + 1;
+      var bitLength = lzwMinCodeSize + 1;
+
+      // Setup LZWTable
+      var table = lzwTable();
+
+      for (var i = 0; i < clearCode; i += 1) {
+        table.add(String.fromCharCode(i) );
+      }
+      table.add(String.fromCharCode(clearCode) );
+      table.add(String.fromCharCode(endCode) );
+
+      var byteOut = byteArrayOutputStream();
+      var bitOut = bitOutputStream(byteOut);
+
+      // clear code
+      bitOut.write(clearCode, bitLength);
+
+      var dataIndex = 0;
+
+      var s = String.fromCharCode(_data[dataIndex]);
+      dataIndex += 1;
+
+      while (dataIndex < _data.length) {
+
+        var c = String.fromCharCode(_data[dataIndex]);
+        dataIndex += 1;
+
+        if (table.contains(s + c) ) {
+
+          s = s + c;
+
+        } else {
+
+          bitOut.write(table.indexOf(s), bitLength);
+
+          if (table.size() < 0xfff) {
+
+            if (table.size() == (1 << bitLength) ) {
+              bitLength += 1;
+            }
+
+            table.add(s + c);
+          }
+
+          s = c;
+        }
+      }
+
+      bitOut.write(table.indexOf(s), bitLength);
+
+      // end code
+      bitOut.write(endCode, bitLength);
+
+      bitOut.flush();
+
+      return byteOut.toByteArray();
+    };
+
+    var lzwTable = function() {
+
+      var _map = {};
+      var _size = 0;
+
+      var _this = {};
+
+      _this.add = function(key) {
+        if (_this.contains(key) ) {
+          throw 'dup key:' + key;
+        }
+        _map[key] = _size;
+        _size += 1;
+      };
+
+      _this.size = function() {
+        return _size;
+      };
+
+      _this.indexOf = function(key) {
+        return _map[key];
+      };
+
+      _this.contains = function(key) {
+        return typeof _map[key] != 'undefined';
+      };
+
+      return _this;
+    };
+
+    return _this;
+  };
+
+  var createDataURL = function(width, height, getPixel) {
+    var gif = gifImage(width, height);
+    for (var y = 0; y < height; y += 1) {
+      for (var x = 0; x < width; x += 1) {
+        gif.setPixel(x, y, getPixel(x, y) );
+      }
+    }
+
+    var b = byteArrayOutputStream();
+    gif.write(b);
+
+    var base64 = base64EncodeOutputStream();
+    var bytes = b.toByteArray();
+    for (var i = 0; i < bytes.length; i += 1) {
+      base64.writeByte(bytes[i]);
+    }
+    base64.flush();
+
+    return 'data:image/gif;base64,' + base64;
+  };
+
+  //---------------------------------------------------------------------
+  // returns qrcode function.
+
+  return qrcode;
+}();
+
+// multibyte support
+!function() {
+
+  qrcode.stringToBytesFuncs['UTF-8'] = function(s) {
+    // http://stackoverflow.com/questions/18729405/how-to-convert-utf8-string-to-byte-array
+    function toUTF8Array(str) {
+      var utf8 = [];
+      for (var i=0; i < str.length; i++) {
+        var charcode = str.charCodeAt(i);
+        if (charcode < 0x80) utf8.push(charcode);
+        else if (charcode < 0x800) {
+          utf8.push(0xc0 | (charcode >> 6),
+              0x80 | (charcode & 0x3f));
+        }
+        else if (charcode < 0xd800 || charcode >= 0xe000) {
+          utf8.push(0xe0 | (charcode >> 12),
+              0x80 | ((charcode>>6) & 0x3f),
+              0x80 | (charcode & 0x3f));
+        }
+        // surrogate pair
+        else {
+          i++;
+          // UTF-16 encodes 0x10000-0x10FFFF by
+          // subtracting 0x10000 and splitting the
+          // 20 bits of 0x0-0xFFFFF into two halves
+          charcode = 0x10000 + (((charcode & 0x3ff)<<10)
+            | (str.charCodeAt(i) & 0x3ff));
+          utf8.push(0xf0 | (charcode >>18),
+              0x80 | ((charcode>>12) & 0x3f),
+              0x80 | ((charcode>>6) & 0x3f),
+              0x80 | (charcode & 0x3f));
+        }
+      }
+      return utf8;
+    }
+    return toUTF8Array(s);
+  };
+
+}();
+
+(function (factory) {
+  if (typeof define === 'function' && define.amd) {
+      define([], factory);
+  } else if (typeof exports === 'object') {
+      module.exports = factory();
+  }
+}(function () {
+    return qrcode;
+}));
+
+  </script>
   <style>
     :root {
-      --p: #6366f1;
-      --s: #10b981;
-      --err: #ef4444;
-      --gray: #94a3b8;
+      --bg: #eef2f7;
+      --panel: #ffffff;
+      --line: #d7dde8;
+      --text: #111827;
+      --muted: #6b7280;
+      --brand: #2563eb;
+      --danger: #dc2626;
     }
+    * { box-sizing: border-box; }
     body {
-      font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
-      background: #f1f5f9;
-      display: flex;
-      justify-content: center;
-      padding: 40px 16px;
       margin: 0;
+      font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+      background: var(--bg);
+      color: var(--text);
     }
-    .card {
-      background: #fff;
-      padding: 28px;
-      border-radius: 20px;
-      width: min(640px, 100%);
-      box-shadow: 0 12px 40px rgba(15, 23, 42, 0.08);
+    .app {
+      min-height: 100vh;
+      display: grid;
+      grid-template-columns: 232px minmax(0, 1fr);
+      gap: 12px;
+      padding: 12px;
     }
-    .status-tag {
-      display: inline-flex;
-      align-items: center;
-      gap: 8px;
-      padding: 6px 12px;
-      border-radius: 999px;
+    /** 首屏仅预设栏靠左，右侧留白；展开后恢复与 .app 一致的双栏 */
+    .app.preset-only {
+      grid-template-columns: minmax(260px, 420px) minmax(0, 1fr);
+      align-content: start;
+    }
+    /** 预设栏从顶铺到底（与 body 可视区同高），列表在内部滚动 */
+    .app.preset-only .preset-rail {
+      min-height: calc(100vh - 24px);
+    }
+    .app.preset-only .main-work {
+      display: none !important;
+    }
+    .preset-rail {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 10px;
+      display: flex;
+      flex-direction: column;
+      min-height: 0;
+      overflow: hidden;
+    }
+    .preset-rail h2 {
+      margin: 0 0 6px;
+      font-size: 15px;
+    }
+    .rail-btns {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 6px;
+      margin-bottom: 8px;
+    }
+    .rail-btns button {
+      padding: 7px 6px;
       font-size: 12px;
-      font-weight: 600;
-      background: #f8fafc;
-      border: 1px solid #e2e8f0;
-      margin-bottom: 16px;
     }
-    .dot {
-      width: 8px;
-      height: 8px;
-      border-radius: 50%;
-      background: var(--gray);
+    .preset-list {
+      flex: 1;
+      overflow: auto;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fafbfc;
     }
-    .dot.online { background: var(--s); box-shadow: 0 0 8px var(--s); }
-    .dot.sync { background: var(--p); }
-    .dot.error { background: var(--err); }
-
-    h3 { text-align: center; color: #1e293b; margin: 0 0 8px; }
-    .sub { text-align: center; font-size: 12px; color: #64748b; margin-bottom: 20px; }
-
-    input, select, textarea, button:not(.preset-card) {
-      width: 100%;
-      padding: 12px 14px;
-      margin: 8px 0;
-      border-radius: 10px;
-      border: 1px solid #e2e8f0;
-      box-sizing: border-box;
-      font-size: 14px;
+    .preset-item {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      padding: 6px 8px;
+      border-bottom: 1px solid var(--line);
+      font-size: 12px;
     }
-    input[type="color"] {
-      padding: 4px;
-      height: 44px;
+    .preset-item:last-child { border-bottom: 0; }
+    .preset-item:hover { background: #f1f5f9; }
+    .preset-item.active {
+      background: #eff6ff;
+      border-left: 3px solid var(--brand);
+      padding-left: 5px;
+    }
+    .preset-item-name {
+      flex: 1;
       cursor: pointer;
+      text-align: left;
+      border: 0;
+      background: transparent;
+      font-size: 12px;
+      color: var(--text);
+      padding: 2px 0;
     }
-    input[type="file"] {
-      padding: 8px;
+    .main-work {
+      display: flex;
+      flex-direction: column;
+      min-width: 0;
+      gap: 8px;
+    }
+    .mode-bar {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      flex-shrink: 0;
+    }
+    .mode-tab {
+      padding: 8px 14px;
+      border-radius: 8px;
+      border: 1px solid var(--line);
+      background: #fff;
+      cursor: pointer;
       font-size: 13px;
     }
-    textarea.field-text {
-      min-height: 72px;
-      resize: vertical;
-      font-family: inherit;
+    .mode-tab.active {
+      background: var(--brand);
+      color: #fff;
+      border-color: var(--brand);
+    }
+    .mode-bar-exit {
+      margin-left: auto;
+      color: var(--muted);
+      border-color: var(--line);
+    }
+    .mode-bar-exit:hover {
+      color: var(--text);
+      border-color: var(--muted);
+    }
+    .main-split {
+      flex: 1;
+      display: grid;
+      grid-template-columns: minmax(300px, 380px) minmax(0, 1fr);
+      gap: 12px;
+      min-height: 0;
+    }
+    .panel, .canvas-wrap {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 12px;
+    }
+    .panel {
+      padding: 12px;
+      overflow: auto;
+    }
+    h1 {
+      margin: 0 0 10px;
+      font-size: 20px;
+    }
+    .small {
+      color: var(--muted);
+      font-size: 12px;
+      margin-bottom: 10px;
       line-height: 1.5;
     }
+    .group {
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 10px;
+      margin-bottom: 10px;
+    }
+    .group h2 {
+      margin: 0 0 8px;
+      font-size: 14px;
+    }
+    .row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 8px;
+    }
+    .row label {
+      min-width: 74px;
+      font-size: 12px;
+      color: var(--muted);
+    }
+    .row input[type="text"],
+    .row input[type="number"],
+    .row select,
+    .row textarea {
+      width: 100%;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 6px 8px;
+      font-size: 13px;
+      outline: none;
+      background: #fff;
+    }
+    .row textarea {
+      resize: vertical;
+      min-height: 56px;
+    }
+    .row input[type="color"] {
+      border: 0;
+      width: 42px;
+      height: 28px;
+      padding: 0;
+      background: transparent;
+    }
+    .row input[type="file"] { width: 100%; font-size: 12px; }
+    .btns {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+      margin-top: 8px;
+    }
     button {
-      background: var(--p);
-      color: #fff;
-      border: none;
-      font-weight: 700;
+      border: 1px solid var(--line);
+      background: #fff;
+      color: var(--text);
+      border-radius: 8px;
+      padding: 8px;
+      font-size: 13px;
       cursor: pointer;
     }
-    button:disabled { background: #cbd5e1; cursor: not-allowed; }
-
-    #login-box, #work-box { margin-top: 4px; }
-    #result-wrap { margin-top: 16px; text-align: center; }
-    #result-wrap img {
-      max-width: 100%;
-      border-radius: 8px;
-      border: 1px solid #e2e8f0;
+    button:hover { filter: brightness(0.98); }
+    button:disabled {
+      opacity: 0.45;
+      cursor: not-allowed;
+      pointer-events: none;
     }
-    #msg { font-size: 12px; color: #94a3b8; text-align: center; margin-top: 10px; }
-    label.field { font-size: 12px; color: #64748b; display: block; margin-top: 10px; }
-    label.field:first-child { margin-top: 0; }
-
-    .pf-section {
-      margin-top: 18px;
-      padding-top: 16px;
-      border-top: 1px solid #e2e8f0;
+    button.primary:disabled {
+      background: #94a3b8;
+      border-color: #94a3b8;
+      color: #f1f5f9;
     }
-    .pf-section:first-of-type { border-top: 0; margin-top: 8px; padding-top: 0; }
-    .pf-h {
-      font-size: 14px;
-      font-weight: 700;
-      color: #334155;
-      margin: 0 0 6px;
+    .primary {
+      background: var(--brand);
+      color: #fff;
+      border-color: var(--brand);
     }
-    .pf-desc {
+    .danger {
+      background: var(--danger);
+      color: #fff;
+      border-color: var(--danger);
+    }
+    .panel-dim {
+      opacity: 0.48;
+      pointer-events: none;
+      user-select: none;
+    }
+    .panel-hint {
       font-size: 12px;
-      color: #94a3b8;
+      color: var(--muted);
       margin: 0 0 10px;
       line-height: 1.45;
     }
-    .pf-layer {
-      background: #f8fafc;
-      border: 1px solid #e2e8f0;
-      border-radius: 12px;
-      padding: 12px;
-      margin-bottom: 10px;
-    }
-    .pf-layer-title {
-      font-size: 12px;
+    .panel-hint strong {
+      color: var(--brand);
       font-weight: 600;
-      color: #475569;
-      margin-bottom: 8px;
     }
-    .pf-thumb {
-      max-width: 100%;
-      max-height: 140px;
-      border-radius: 8px;
-      border: 1px solid #e2e8f0;
-      display: block;
-      margin-bottom: 8px;
-      background: #fff;
-    }
-    .pf-err { color: var(--err); font-size: 13px; margin: 8px 0; }
-    details.adv {
-      margin-top: 14px;
-      font-size: 12px;
-      color: #64748b;
-    }
-    details.adv summary { cursor: pointer; user-select: none; }
-    details.adv textarea {
-      margin-top: 8px;
-      min-height: 120px;
-      font-family: Consolas, monospace;
-      font-size: 11px;
-    }
-    details.adv-login {
-      margin-top: 12px;
-      font-size: 12px;
-      color: #64748b;
-    }
-    details.adv-login summary {
-      cursor: pointer;
-      user-select: none;
-    }
-    details.adv-login input {
-      margin-top: 0;
-    }
-
-    .preset-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(112px, 1fr));
-      gap: 10px;
-      margin-top: 8px;
-    }
-    button.preset-card {
-      width: auto;
-      min-width: 0;
-      padding: 8px;
-      margin: 0;
-      background: #f8fafc;
-      border: 2px solid #e2e8f0;
-      color: #334155;
-      font-weight: 600;
-      font-size: 11px;
-      line-height: 1.3;
-      display: flex;
-      flex-direction: column;
-      align-items: stretch;
-      gap: 6px;
-      border-radius: 12px;
-      cursor: pointer;
-      text-align: center;
-    }
-    button.preset-card:hover {
-      border-color: #cbd5e1;
-    }
-    button.preset-card.selected {
-      border-color: var(--p);
-      background: #eef2ff;
-      box-shadow: 0 0 0 1px rgba(99, 102, 241, 0.25);
-    }
-    button.preset-card img {
-      width: 100%;
-      height: 76px;
-      object-fit: cover;
-      border-radius: 8px;
-      margin: 0;
-      padding: 0;
-      border: none;
-    }
-    .preset-card-ph {
-      width: 100%;
-      height: 76px;
+    .canvas-wrap {
       display: flex;
       align-items: center;
       justify-content: center;
-      background: #e2e8f0;
-      color: #64748b;
-      font-size: 16px;
-      font-weight: 700;
-      border-radius: 8px;
+      padding: 12px;
+      overflow: auto;
     }
-    .preset-card span {
+    #stage {
+      background: #f3f4f6;
+      border: 1px dashed #c8d0df;
+      border-radius: 10px;
+      max-width: 100%;
+      max-height: calc(100vh - 60px);
+    }
+    .qr-box {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fafafa;
+      padding: 8px;
+      text-align: center;
+    }
+    #qrCanvas {
+      width: 180px;
+      height: 180px;
+      max-width: 100%;
+      background: #fff;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+    }
+    #qrHint {
+      font-size: 12px;
+      color: var(--muted);
+      margin-top: 6px;
+      line-height: 1.5;
       word-break: break-word;
     }
-
-    .progress-wrap {
-      display: none;
-      margin: 14px 0 10px;
+    html.embed-render .app {
+      grid-template-columns: 1fr;
+      min-height: auto;
     }
-    .progress-wrap.visible {
-      display: block;
+    html.embed-render .preset-rail,
+    html.embed-render .mode-bar {
+      display: none !important;
     }
-    .progress-bar {
-      height: 8px;
-      background: #e2e8f0;
-      border-radius: 999px;
-      overflow: hidden;
+    html.embed-render .main-split {
+      grid-template-columns: 1fr;
     }
-    .progress-fill {
-      height: 100%;
-      width: 0%;
-      border-radius: 999px;
-      background: linear-gradient(90deg, var(--p), #818cf8);
-      transition: width 0.15s ease;
+    html.embed-render .app aside.panel#panel-design {
+      display: none !important;
     }
-    .progress-fill.indeterminate {
-      animation: progressIndet 1.2s ease-in-out infinite;
-    }
-    @keyframes progressIndet {
-      0% { transform: translateX(-100%); width: 40%; }
-      50% { width: 55%; }
-      100% { transform: translateX(280%); width: 40%; }
-    }
-    .progress-text {
-      font-size: 12px;
-      color: #64748b;
-      margin: 8px 0 0;
-      line-height: 1.45;
-      min-height: 2.9em;
+    html.embed-render .app aside.panel#panel-quick {
+      display: none !important;
     }
   </style>
 </head>
 <body>
-  <div class="card">
-    <div style="text-align:center;">
-      <div class="status-tag">
-        <div id="status-dot" class="dot"></div>
-        <span id="status-text">正在初始化…</span>
+  <div class="app preset-only" id="appRoot">
+    <aside class="preset-rail">
+      <h2>预设库</h2>
+      <p class="small" style="margin-bottom:8px;">
+        先<strong>选择本地文件夹</strong>（需 Chrome / Edge 等支持）。预设保存为其中的 <code>.json</code>，列表会定时扫描更新；大文件不占用浏览器存储配额。
+      </p>
+      <button type="button" id="railPickFolder" class="primary" style="width:100%;margin-bottom:8px;">选择预设文件夹…</button>
+      <p id="presetFolderHint" class="small" style="margin-bottom:8px;color:var(--muted);">未选择文件夹</p>
+      <div class="rail-btns">
+        <button type="button" id="railNewTemplate" class="primary">创建模板</button>
+        <button type="button" id="railAddJson">上传 JSON</button>
+        <button type="button" id="railDelete" class="danger">删除</button>
+        <button type="button" id="railUpdateFromCanvas">更新库项</button>
       </div>
-    </div>
+      <input type="file" id="railAddJsonInput" accept=".json,application/json" hidden />
+      <div id="presetList" class="preset-list" aria-label="预设列表"></div>
+    </aside>
+    <div class="main-work">
+      <div class="mode-bar">
+        <button type="button" id="exitSynthBtn" class="mode-tab mode-bar-exit">返回预设库</button>
+      </div>
+      <div class="main-split">
+    <aside class="panel" id="panel-design">
+      <h1>模板编辑</h1>
+      <div class="small">参考你给的样式：背景、照片、二维码、印章/Logo、文字都能自定义。点击舞台对象后可拖动，导出 PNG。Ctrl+Z（Mac：⌘Z）撤销上一步。</div>
 
-    <h3>图片合成 · 用户端</h3>
-    <p class="sub">选择预设后，仅可改「标签：」后面的文字（冒号后），以及替换与「头像.png」对应的头像图。</p>
-
-    <div id="login-box">
-      <input type="text" id="u" placeholder="账号" autocomplete="username" />
-      <input type="password" id="p" placeholder="密码" autocomplete="current-password" />
-      <button type="button" id="login-btn">连接并登录</button>
-      <details class="adv-login">
-        <summary>高级：自定义中枢 ID</summary>
-        <p class="pf-desc" style="margin:8px 0 4px;">一般不用改；仅当你的管理端使用了其它 Peer ID 时再填写。</p>
-        <input type="text" id="admin-id" placeholder="留空则使用内置默认" autocomplete="off" />
-      </details>
-    </div>
-
-    <div id="work-box" style="display:none;">
-      <label class="field">选择预设</label>
-      <p class="pf-desc" style="margin:0 0 4px;">点击下方卡片（图为管理端同名预览图）</p>
-      <div id="preset-grid" class="preset-grid" aria-label="预设列表"></div>
-
-      <div id="preset-form"></div>
-
-      <details class="adv">
-        <summary>高级：查看原始 JSON（一般不必打开）</summary>
-        <textarea id="preset-json-view" readonly placeholder="选择预设后出现…"></textarea>
-      </details>
-
-      <button type="button" id="submit-btn" disabled>提交合成</button>
-
-      <div id="progress-wrap" class="progress-wrap" role="status" aria-live="polite">
-        <div class="progress-bar" aria-hidden="true">
-          <div id="progress-fill" class="progress-fill indeterminate"></div>
+      <section class="group">
+        <h2>画布设置</h2>
+        <div class="row">
+          <label>宽度</label>
+          <input id="canvasW" type="number" value="1280" min="300" />
         </div>
-        <p id="progress-text" class="progress-text"></p>
-      </div>
+        <div class="row">
+          <label>高度</label>
+          <input id="canvasH" type="number" value="980" min="300" />
+        </div>
+        <div class="btns">
+          <button id="applySize">应用尺寸</button>
+          <button id="exportBtn" class="primary">导出 PNG</button>
+        </div>
+        <div class="small" style="margin-top:8px;">画布预设：保存排版、图层、背景与下方二维码区输入。「导出」写入左侧已选的本地预设文件夹（浏览器会记住），列表会自动刷新；「导入」从本机任选 JSON。</div>
+        <div class="btns" style="grid-template-columns: 1fr 1fr;">
+          <button id="exportCanvasPresetBtn" type="button" class="primary">导出画布预设</button>
+          <button id="importCanvasPresetBtn" type="button">导入画布预设</button>
+        </div>
+        <input id="importCanvasPresetInput" type="file" accept=".json,application/json" style="display:none" />
+      </section>
 
-      <p id="msg"></p>
-      <div id="result-wrap"></div>
+      <section class="group">
+        <h2>背景</h2>
+        <div class="row">
+          <label>背景图</label>
+          <input id="bgInput" type="file" accept="image/*" />
+        </div>
+        <div class="row">
+          <label>底色</label>
+          <input id="bgColor" type="color" value="#f5f5f5" />
+        </div>
+      </section>
+
+      <section class="group" id="panelText">
+        <h2>文字</h2>
+        <p id="textModeHint" class="panel-hint">未选中文字图层时，下方选项用于<strong>下一次添加</strong>；点击画布上的文字后，在此编辑内容与样式。</p>
+        <div class="row">
+          <label>内容</label>
+          <textarea id="textValue" placeholder="输入文字内容"></textarea>
+        </div>
+        <div class="row">
+          <label>字号</label>
+          <input id="fontSize" type="number" value="42" min="10" />
+        </div>
+        <div class="row">
+          <label>颜色</label>
+          <input id="fontColor" type="color" value="#111111" />
+        </div>
+        <div class="row">
+          <label>字体</label>
+          <select id="fontFamilyPreset">
+            <option value="Microsoft YaHei, sans-serif">微软雅黑</option>
+            <option value="SimSun, Songti SC, serif">宋体</option>
+            <option value="SimHei, STHeiti, sans-serif">黑体</option>
+            <option value="KaiTi, STKaiti, serif">楷体</option>
+            <option value="FangSong, STFangsong, serif">仿宋</option>
+            <option value="custom">自定义…</option>
+          </select>
+        </div>
+        <div class="row" id="fontCustomRow" style="display:none;">
+          <label>自定义</label>
+          <input id="fontFamilyCustom" type="text" placeholder='例如：&quot;Source Han Sans SC&quot;, sans-serif' />
+        </div>
+        <div class="btns">
+          <button id="addTextBtn">添加文字到画布</button>
+          <button id="addStampBtn">添加红色印章字</button>
+        </div>
+      </section>
+
+      <section class="group" id="panelImage">
+        <h2>图片</h2>
+        <p id="imageModeHint" class="panel-hint">未选中图片图层时，选择文件将<strong>添加新图片</strong>；选中画布上的普通图片后，可替换或调节效果。</p>
+        <div class="row">
+          <label>添加图片</label>
+          <input id="imgInput" type="file" accept="image/*" />
+        </div>
+        <div id="selectedImageBlock" style="display:none;">
+          <div class="row">
+            <label>替换</label>
+            <button id="replaceLayerImageBtn" type="button" style="width:100%;">替换当前图片…</button>
+            <input id="replaceLayerImageInput" type="file" accept="image/*" style="display:none" />
+          </div>
+          <div class="row">
+            <label>旋转(°)</label>
+            <input id="imageRotationDeg" type="range" min="-180" max="180" value="0" />
+          </div>
+          <div class="row">
+            <label>模糊</label>
+            <input id="imageBlurPx" type="range" min="0" max="20" value="0" />
+          </div>
+          <div class="row">
+            <label>灰度</label>
+            <input id="imageGrayscale" type="range" min="0" max="100" value="0" />
+          </div>
+          <div class="row">
+            <label>亮度</label>
+            <input id="imageBrightness" type="range" min="50" max="150" value="100" />
+          </div>
+        </div>
+      </section>
+
+      <section class="group" id="layerTransformSection" style="display:none;">
+        <h2>当前图层（变换）</h2>
+        <p class="panel-hint">对当前选中的文字或普通图片图层调整大小与叠放顺序。</p>
+        <div class="row">
+          <label>缩放(%)</label>
+          <input id="scaleRange" type="range" min="10" max="300" value="100" />
+        </div>
+        <div class="row">
+          <label>透明度</label>
+          <input id="opacityRange" type="range" min="10" max="100" value="100" />
+        </div>
+        <div class="btns">
+          <button id="bringFront">置顶</button>
+          <button id="sendBack">置底</button>
+          <button id="deleteLayer" class="danger">删除图层</button>
+          <button id="cloneLayer">复制图层</button>
+        </div>
+      </section>
+
+      <section class="group" id="onlineQrSection">
+        <h2>二维码</h2>
+        <div id="qrLayerToolbar" style="display:none;">
+          <div class="small" style="margin-bottom:8px;color:var(--brand);font-weight:600;">当前选中：二维码图层（特殊图层，请在下方修改编号与 URL 并更新；缩放与叠放可在此调整）</div>
+          <div class="row">
+            <label>缩放(%)</label>
+            <input id="qrScaleRange" type="range" min="10" max="300" value="100" />
+          </div>
+          <div class="row">
+            <label>透明度</label>
+            <input id="qrOpacityRange" type="range" min="10" max="100" value="100" />
+          </div>
+          <div class="btns">
+            <button type="button" id="qrBringFront">置顶</button>
+            <button type="button" id="qrSendBack">置底</button>
+            <button type="button" id="qrDeleteLayer" class="danger">删除图层</button>
+            <button type="button" id="qrCloneLayer">复制图层</button>
+          </div>
+        </div>
+        <div class="small" id="onlineQrIntro">在此填写编号与 URL 模板。选中画布上<strong>本工具生成的</strong>二维码图层时，会自动同步到下方输入框；改完后点「更新选中二维码」即可替换画布中的图。</div>
+        <div id="qrSyncHint" class="small" style="display:none;color:var(--brand);margin-bottom:8px;">已选中画布上的二维码图层，编号与模板已同步。</div>
+        <div class="row">
+          <label>证件编号</label>
+          <input id="certIdValue" type="text" placeholder="例如：177451822099153" />
+        </div>
+        <div class="row">
+          <label>URL模板</label>
+          <input id="imageUrlTpl" type="text" placeholder="例如：https://your-domain.com/img/mob7/{id}.html" />
+        </div>
+        <div class="row">
+          <label>已保存</label>
+          <select id="templateSelect">
+            <option value="">— 选择已保存模板 —</option>
+          </select>
+        </div>
+        <div class="btns">
+          <button id="saveTemplateBtn" type="button">保存当前模板</button>
+          <button id="deleteTemplateBtn" type="button">删除所选</button>
+        </div>
+        <div class="btns">
+          <button id="genQrBtn">生成并放到画布</button>
+          <button id="updateSelectedQrBtn" type="button" class="primary">更新选中二维码</button>
+        </div>
+        <div class="qr-box" style="margin-top:8px;">
+          <canvas id="qrCanvas" width="180" height="180"></canvas>
+          <div id="qrHint">输入编号和模板后点击生成</div>
+        </div>
+      </section>
+    </aside>
+
+    <aside class="panel" id="panel-quick" style="display:none;">
+      <h2>快速合成</h2>
+      <div class="btns" style="margin-bottom:10px;">
+        <button type="button" id="quickToDesignBtn">模板编辑</button>
+      </div>
+      <p class="small">优先识别<strong>文件名去扩展名为「头像」</strong>的图片图层（与添加图片时的文件名一致）；若无则使用第一张非二维码照片。文字行含中文冒号「：」或半角「:」时，只改冒号后的内容。</p>
+      <div id="quickPresetTitle" class="small" style="font-weight:600;margin-bottom:8px;color:var(--brand);"></div>
+      <div id="quickTextFields" class="quick-fields"></div>
+      <section class="group" style="margin-top:10px;">
+        <h2>头像</h2>
+        <input type="file" id="quickAvatarInput" accept="image/*" />
+        <div id="quickAvatarPreviewWrap" style="display:none;margin-top:8px;">
+          <img id="quickAvatarPreview" alt="头像预览" style="max-width:100%;max-height:180px;border-radius:8px;border:1px solid var(--line);object-fit:contain;display:block;" />
+        </div>
+        <p id="quickAvatarHint" class="small" style="margin-top:6px;"></p>
+      </section>
+      <section class="group" id="quickQrSection" style="display:none;">
+        <h2>二维码</h2>
+        <p class="small">生成原理：将「URL 模板」中的 <code>{id}</code> 换成下方编号，得到链接字符串，再用二维码库绘成图案（与左侧模板设计一致）。扫码即访问该链接；若需打开服务器上的成图页，请把模板设为该页地址并保证编号与上传一致。</p>
+        <div class="row">
+          <label>证件编号</label>
+          <input id="quickCertId" type="text" placeholder="与 URL 模板 {id} 对应" />
+        </div>
+      </section>
+      <section class="group">
+        <h2>导出</h2>
+        <div class="row">
+          <label>上传 API</label>
+          <input id="quickUploadApi" type="text" placeholder="POST 接口，如 https://域名/api/upload" />
+        </div>
+        <div class="btns" style="grid-template-columns: 1fr 1fr;">
+          <button type="button" id="quickComposeBtn" class="primary">合成预览</button>
+          <button type="button" id="quickPngBtn">下载 PNG</button>
+          <button type="button" id="quickPdfBtn">下载 PDF</button>
+          <button type="button" id="quickUploadBtn">上传服务器</button>
+        </div>
+        <p id="quickUploadMsg" class="small" style="margin-top:8px;color:var(--muted);"></p>
+      </section>
+    </aside>
+
+    <main class="canvas-wrap">
+      <canvas id="stage" width="1280" height="980" tabindex="0"></canvas>
+    </main>
+      </div>
     </div>
   </div>
 
   <script>
-    const ADMIN_ID_DEFAULT = "IDCARD_SYNTH_ADMIN_2026";
-    const PRESET_VERSION = 1;
+    const canvas = document.getElementById("stage");
+    const ctx = canvas.getContext("2d");
+    let qrReady = false;
 
-    const PEER_OPTIONS = {
-      host: "0.peerjs.com",
-      port: 443,
-      path: "/",
-      secure: true,
-      config: {
-        iceServers: [
-          { urls: "stun:stun.l.google.com:19302" },
-          { urls: "stun:stun1.l.google.com:19302" },
-          { urls: "stun:stun2.l.google.com:19302" },
-          { urls: "stun:stun.stunprotocol.org:3478" },
-          { urls: "stun:global.stun.twilio.com:3478" }
-        ],
-        iceCandidatePoolSize: 10,
-        iceTransportPolicy: "all"
-      }
+    const state = {
+      bgColor: "#f5f5f5",
+      bgImage: null,
+      layers: [],
+      selectedId: null,
+      drag: null
     };
 
-    /**
-     * 必须用 binary（BinaryPack）：json 模式用 JSON.stringify，无法传输 ArrayBuffer（会变成 {}），
-     * 且单条 >~16KB 会 MessageToBig。binary 与网盘代下一致，可传大块二进制。
-     */
-    const DATA_CONN_OPTS = { reliable: true, serialization: "binary" };
-    const LOGIN_CONNECT_MS = 35000;
-    /** 用户 → 管理端：大 JSON 分片（与中枢 BIN_CHUNK 同量级） */
-    const RENDER_UPLOAD_CHUNK = 256 * 1024;
-    const SMALL_RENDER_UPLOAD = 64 * 1024;
-    let renderReqUploadSeq = 0;
-    /** 上传合成请求分片时：{ tid, n, lastAck }，与 RENDER_REQ_ACK 同步 */
-    let renderReqUploadState = null;
+    let syncingUi = false;
 
-    let peer = new Peer(PEER_OPTIONS);
-    let conn = null;
-    /** 每次点击登录 +1，用于区分旧连接事件，避免用 conn===thisConn 在超时置 null 后误杀 open */
-    let loginGen = 0;
-    let loginConnectTimer = null;
-    let currentPreset = null;
-    /** 与中枢 presets Map 的 key 一致，用于合成时与本地完整预设合并 */
-    let currentPresetId = null;
-    /** 用户最后一次点击卡片请求的预设 id；忽略链路上仍排队中的其它预设，避免「选中 A 却显示 B」 */
-    let lastRequestedPresetId = null;
-    let presetInbox = null;
-    let renderPngInbox = null;
-    let avatarLayerId = null;
+    let appMode = "design";
+    let selectedLibraryId = null;
+    let loadedFromLibraryId = null;
+    let quickPresetBase = null;
+    let quickAvatarDataUrl = null;
 
-    let renderProgressFallbackTimer = null;
-    const renderProgressHints = [
-      "仍在处理中，请勿关闭页面…",
-      "大图与二维码耗时较长属正常现象",
-      "若超过两分钟无结果，可请管理员查看中枢日志"
-    ];
+    const ui = {
+      canvasW: document.getElementById("canvasW"),
+      canvasH: document.getElementById("canvasH"),
+      applySize: document.getElementById("applySize"),
+      exportBtn: document.getElementById("exportBtn"),
+      bgInput: document.getElementById("bgInput"),
+      bgColor: document.getElementById("bgColor"),
+      imgInput: document.getElementById("imgInput"),
+      textValue: document.getElementById("textValue"),
+      fontSize: document.getElementById("fontSize"),
+      fontColor: document.getElementById("fontColor"),
+      fontFamilyPreset: document.getElementById("fontFamilyPreset"),
+      fontFamilyCustom: document.getElementById("fontFamilyCustom"),
+      fontCustomRow: document.getElementById("fontCustomRow"),
+      panelText: document.getElementById("panelText"),
+      panelImage: document.getElementById("panelImage"),
+      textModeHint: document.getElementById("textModeHint"),
+      imageModeHint: document.getElementById("imageModeHint"),
+      layerTransformSection: document.getElementById("layerTransformSection"),
+      selectedImageBlock: document.getElementById("selectedImageBlock"),
+      replaceLayerImageBtn: document.getElementById("replaceLayerImageBtn"),
+      replaceLayerImageInput: document.getElementById("replaceLayerImageInput"),
+      imageRotationDeg: document.getElementById("imageRotationDeg"),
+      imageBlurPx: document.getElementById("imageBlurPx"),
+      imageGrayscale: document.getElementById("imageGrayscale"),
+      imageBrightness: document.getElementById("imageBrightness"),
+      qrSyncHint: document.getElementById("qrSyncHint"),
+      updateSelectedQrBtn: document.getElementById("updateSelectedQrBtn"),
+      qrLayerToolbar: document.getElementById("qrLayerToolbar"),
+      onlineQrIntro: document.getElementById("onlineQrIntro"),
+      qrScaleRange: document.getElementById("qrScaleRange"),
+      qrOpacityRange: document.getElementById("qrOpacityRange"),
+      qrBringFront: document.getElementById("qrBringFront"),
+      qrSendBack: document.getElementById("qrSendBack"),
+      qrDeleteLayer: document.getElementById("qrDeleteLayer"),
+      qrCloneLayer: document.getElementById("qrCloneLayer"),
+      addTextBtn: document.getElementById("addTextBtn"),
+      addStampBtn: document.getElementById("addStampBtn"),
+      scaleRange: document.getElementById("scaleRange"),
+      opacityRange: document.getElementById("opacityRange"),
+      bringFront: document.getElementById("bringFront"),
+      sendBack: document.getElementById("sendBack"),
+      deleteLayer: document.getElementById("deleteLayer"),
+      cloneLayer: document.getElementById("cloneLayer"),
+      certIdValue: document.getElementById("certIdValue"),
+      imageUrlTpl: document.getElementById("imageUrlTpl"),
+      templateSelect: document.getElementById("templateSelect"),
+      saveTemplateBtn: document.getElementById("saveTemplateBtn"),
+      deleteTemplateBtn: document.getElementById("deleteTemplateBtn"),
+      genQrBtn: document.getElementById("genQrBtn"),
+      qrCanvas: document.getElementById("qrCanvas"),
+      qrHint: document.getElementById("qrHint"),
+      importCanvasPresetBtn: document.getElementById("importCanvasPresetBtn"),
+      importCanvasPresetInput: document.getElementById("importCanvasPresetInput"),
+      exportCanvasPresetBtn: document.getElementById("exportCanvasPresetBtn"),
+      quickToDesignBtn: document.getElementById("quickToDesignBtn"),
+      exitSynthBtn: document.getElementById("exitSynthBtn"),
+      panelDesign: document.getElementById("panel-design"),
+      panelQuick: document.getElementById("panel-quick"),
+      presetList: document.getElementById("presetList"),
+      railNewTemplate: document.getElementById("railNewTemplate"),
+      railAddJson: document.getElementById("railAddJson"),
+      railAddJsonInput: document.getElementById("railAddJsonInput"),
+      railDelete: document.getElementById("railDelete"),
+      railUpdateFromCanvas: document.getElementById("railUpdateFromCanvas"),
+      quickPresetTitle: document.getElementById("quickPresetTitle"),
+      quickTextFields: document.getElementById("quickTextFields"),
+      quickAvatarInput: document.getElementById("quickAvatarInput"),
+      quickAvatarHint: document.getElementById("quickAvatarHint"),
+      quickCertId: document.getElementById("quickCertId"),
+      quickUploadApi: document.getElementById("quickUploadApi"),
+      quickComposeBtn: document.getElementById("quickComposeBtn"),
+      quickPngBtn: document.getElementById("quickPngBtn"),
+      quickPdfBtn: document.getElementById("quickPdfBtn"),
+      quickUploadBtn: document.getElementById("quickUploadBtn"),
+      quickUploadMsg: document.getElementById("quickUploadMsg"),
+      railPickFolder: document.getElementById("railPickFolder"),
+      presetFolderHint: document.getElementById("presetFolderHint"),
+      quickAvatarPreview: document.getElementById("quickAvatarPreview"),
+      quickAvatarPreviewWrap: document.getElementById("quickAvatarPreviewWrap"),
+      quickQrSection: document.getElementById("quickQrSection")
+    };
 
-    const statusDot = document.getElementById("status-dot");
-    const statusText = document.getElementById("status-text");
+    let presetDirHandle = null;
+    let lastPreviewBlobUrls = [];
 
-    function updateStatus(state, msg) {
-      statusText.textContent = msg;
-      statusDot.className = "dot " + state;
-    }
+    const TEMPLATE_STORAGE_KEY = "cert_url_templates_v1";
 
-    function formatPeerJsError(err) {
-      const t = err && err.type;
-      if (t === "peer-unavailable") {
-        return "找不到管理端：请在本机先打开 admin-p2p.html（并保持页面不关），中枢 Peer ID 须与用户端一致。";
-      }
-      if (t === "network" || t === "socket-error") {
-        return "无法连接 PeerJS 信令服务：检查网络、代理或防火墙，或稍后重试。";
-      }
-      if (t === "disconnected" || t === "socket-closed") {
-        return "与 P2P 服务断开，请刷新页面后重试。";
-      }
-      if (t === "invalid-id") {
-        return "中枢 ID 无效，请展开「高级」检查或与管理端约定一致。";
-      }
-      if (t === "webrtc-error" || t === "browser-incompatible") {
-        return "浏览器 WebRTC 受限：换 Chrome/Edge 最新版，或关闭禁用 WebRTC 的插件。";
-      }
-      return (err && (err.message || String(err.type))) || "连接失败";
-    }
-
-    function toArrayBufferChunk(v) {
-      if (!v) return null;
-      if (v instanceof ArrayBuffer) return v;
-      if (ArrayBuffer.isView(v)) {
-        return v.buffer.slice(v.byteOffset, v.byteOffset + v.byteLength);
-      }
-      return null;
-    }
-
-    function joinUtf8Parts(parts) {
-      let total = 0;
-      for (const p of parts) {
-        if (!p) return null;
-        total += p.byteLength;
-      }
-      const out = new Uint8Array(total);
-      let off = 0;
-      for (const p of parts) {
-        out.set(new Uint8Array(p), off);
-        off += p.byteLength;
-      }
-      return new TextDecoder().decode(out);
-    }
-
-    async function sendRenderRequestToAdmin(conn, presetId, preset) {
-      const json = JSON.stringify({ presetId, preset });
-      const enc = new TextEncoder();
-      const bytes = enc.encode(json);
-      if (bytes.byteLength <= SMALL_RENDER_UPLOAD) {
-        conn.send({ type: "RENDER_REQUEST", presetId, preset });
-        return;
-      }
-      const tid = ++renderReqUploadSeq;
-      const n = Math.ceil(bytes.byteLength / RENDER_UPLOAD_CHUNK);
-      renderReqUploadState = { tid, n, lastAck: -1 };
-      conn.send({
-        type: "RENDER_REQ_BEGIN",
-        tid,
-        n,
-        byteLen: bytes.byteLength
-      });
-      setProgressDeterminate(0, "正在上传合成请求 0/" + n + " 片");
-      const buf = bytes.buffer;
-      const base = bytes.byteOffset;
-      const len = bytes.byteLength;
-      let chunkIdx = 0;
-      for (let off = 0; off < len; off += RENDER_UPLOAD_CHUNK) {
-        while (
-          renderReqUploadState &&
-          renderReqUploadState.tid === tid &&
-          chunkIdx - renderReqUploadState.lastAck > 12
-        ) {
-          await new Promise((r) => setTimeout(r, 10));
-        }
-        if (!conn || !conn.open) {
-          renderReqUploadState = null;
-          throw new Error("连接已断开，请重新登录");
-        }
-        const end = Math.min(off + RENDER_UPLOAD_CHUNK, len);
-        const slice = buf.slice(base + off, base + end);
-        conn.send({ type: "RENDER_REQ_CHUNK", tid, i: chunkIdx, bytes: slice });
-        chunkIdx++;
-      }
-      conn.send({ type: "RENDER_REQ_END", tid });
-      renderReqUploadState = null;
-    }
-
-    peer.on("open", () => {
-      updateStatus("", "已进入 P2P，请登录");
-    });
-
-    peer.on("disconnected", () => {
-      updateStatus("error", "与信令服务断开，正在尝试重连…");
+    function loadTemplateList() {
       try {
-        if (typeof peer.reconnect === "function") peer.reconnect();
-      } catch (e) {
-        console.error(e);
-      }
-    });
-
-    peer.on("error", (err) => {
-      console.error(err);
-      updateStatus("error", formatPeerJsError(err));
-      setMsg(formatPeerJsError(err));
-    });
-
-    function setMsg(t) {
-      document.getElementById("msg").textContent = t || "";
-    }
-
-    /** 管理端排队/制图阶段：无分片比例，用不确定进度条 */
-    function setProgressIndeterminate(text) {
-      const wrap = document.getElementById("progress-wrap");
-      const fill = document.getElementById("progress-fill");
-      const txt = document.getElementById("progress-text");
-      wrap.classList.add("visible");
-      fill.classList.add("indeterminate");
-      fill.style.width = "";
-      if (renderProgressFallbackTimer) {
-        clearInterval(renderProgressFallbackTimer);
-        renderProgressFallbackTimer = null;
-      }
-      if (text != null) txt.textContent = text;
-    }
-
-    /** 分片传输（预设/合成图 PNG）：按已收片数显示真实比例（与 PRESET_ACK/RENDER_ACK 对应） */
-    function setProgressDeterminate(pct, text) {
-      const wrap = document.getElementById("progress-wrap");
-      const fill = document.getElementById("progress-fill");
-      const txt = document.getElementById("progress-text");
-      wrap.classList.add("visible");
-      fill.classList.remove("indeterminate");
-      fill.style.width = Math.min(100, Math.max(0, pct)) + "%";
-      if (text != null) txt.textContent = text;
-      if (renderProgressFallbackTimer) {
-        clearInterval(renderProgressFallbackTimer);
-        renderProgressFallbackTimer = null;
+        const raw = localStorage.getItem(TEMPLATE_STORAGE_KEY);
+        if (!raw) return [];
+        const arr = JSON.parse(raw);
+        return Array.isArray(arr) ? arr.filter((x) => x && x.name && typeof x.tpl === "string") : [];
+      } catch {
+        return [];
       }
     }
 
-    function startRenderProgressUI(initialText) {
-      setProgressIndeterminate(initialText || "处理中…");
-      const txt = document.getElementById("progress-text");
-      let i = 0;
-      renderProgressFallbackTimer = setInterval(() => {
-        i = (i + 1) % renderProgressHints.length;
-        txt.textContent = renderProgressHints[i];
-      }, 4500);
+    function saveTemplateList(list) {
+      localStorage.setItem(TEMPLATE_STORAGE_KEY, JSON.stringify(list));
     }
 
-    function setRenderProgressText(text) {
-      document.getElementById("progress-text").textContent = text || "";
-    }
-
-    function stopRenderProgressUI() {
-      const wrap = document.getElementById("progress-wrap");
-      const fill = document.getElementById("progress-fill");
-      const txt = document.getElementById("progress-text");
-      wrap.classList.remove("visible");
-      fill.classList.remove("indeterminate");
-      fill.style.width = "";
-      txt.textContent = "";
-      if (renderProgressFallbackTimer) {
-        clearInterval(renderProgressFallbackTimer);
-        renderProgressFallbackTimer = null;
-      }
-    }
-
-    function applyPresetPreviewToCard(id, url) {
-      if (!id || !url) return;
-      const grid = document.getElementById("preset-grid");
-      const btn = [...grid.querySelectorAll(".preset-card")].find((b) => b.dataset.id === id);
-      if (!btn) return;
-      const ph = btn.querySelector(".preset-card-ph");
-      const existing = btn.querySelector("img");
-      if (existing) {
-        existing.src = url;
-        return;
-      }
-      const img = document.createElement("img");
-      img.alt = "";
-      img.src = url;
-      if (ph) ph.replaceWith(img);
-      else btn.insertBefore(img, btn.firstChild);
-    }
-
-    function renderPresetPicker(items) {
-      const grid = document.getElementById("preset-grid");
-      grid.innerHTML = "";
-      (items || []).forEach((it) => {
-        const btn = document.createElement("button");
-        btn.type = "button";
-        btn.className = "preset-card";
-        btn.dataset.id = it.id;
-        if (it.previewDataUrl) {
-          const img = document.createElement("img");
-          img.src = it.previewDataUrl;
-          img.alt = "";
-          btn.appendChild(img);
-        } else {
-          const ph = document.createElement("div");
-          ph.className = "preset-card-ph";
-          ph.textContent = (it.name || it.id || "?").trim().slice(0, 2) || "?";
-          btn.appendChild(ph);
-        }
-        const cap = document.createElement("span");
-        cap.textContent = it.name || it.id;
-        btn.appendChild(cap);
-        btn.addEventListener("click", () => {
-          grid.querySelectorAll(".preset-card").forEach((c) => {
-            c.classList.toggle("selected", c === btn);
-          });
-          clearPresetForm();
-          lastRequestedPresetId = it.id;
-          document.getElementById("submit-btn").disabled = true;
-          if (!conn || !conn.open) return;
-          setMsg("正在拉取预设…");
-          conn.send({ type: "PRESET_GET", id: it.id });
-        });
-        grid.appendChild(btn);
+    function refreshTemplateSelect() {
+      const list = loadTemplateList();
+      const prev = ui.templateSelect.value;
+      ui.templateSelect.innerHTML = "";
+      const opt0 = document.createElement("option");
+      opt0.value = "";
+      opt0.textContent = "— 选择已保存模板 —";
+      ui.templateSelect.appendChild(opt0);
+      list.forEach((item) => {
+        const o = document.createElement("option");
+        o.value = item.tpl;
+        o.textContent = item.name;
+        ui.templateSelect.appendChild(o);
       });
+      if (prev && list.some((x) => x.tpl === prev)) {
+        ui.templateSelect.value = prev;
+      }
     }
 
-    function fileToDataUrl(file) {
+    function getFontFamilyFromPreset(presetEl, customEl) {
+      if (presetEl.value === "custom") {
+        const t = customEl.value.trim();
+        return t || "Microsoft YaHei, sans-serif";
+      }
+      return presetEl.value;
+    }
+
+    function applyFontPresetFromLayer(layer) {
+      const ff = layer.fontFamily || "Microsoft YaHei, sans-serif";
+      const presetValues = ["Microsoft YaHei, sans-serif", "SimSun, Songti SC, serif", "SimHei, STHeiti, sans-serif", "KaiTi, STKaiti, serif", "FangSong, STFangsong, serif"];
+      if (presetValues.includes(ff)) {
+        ui.fontFamilyPreset.value = ff;
+        ui.fontCustomRow.style.display = "none";
+      } else {
+        ui.fontFamilyPreset.value = "custom";
+        ui.fontFamilyCustom.value = ff;
+        ui.fontCustomRow.style.display = "flex";
+      }
+    }
+
+    function uid() {
+      return Math.random().toString(36).slice(2, 9);
+    }
+
+    function loadImage(file) {
       return new Promise((resolve, reject) => {
         const fr = new FileReader();
-        fr.onload = () => resolve(fr.result);
+        fr.onload = () => {
+          const img = new Image();
+          img.onload = () => resolve(img);
+          img.onerror = reject;
+          img.src = fr.result;
+        };
         fr.onerror = reject;
         fr.readAsDataURL(file);
       });
     }
 
-    function clearPresetForm() {
-      presetInbox = null;
-      renderPngInbox = null;
-      document.getElementById("preset-form").innerHTML = "";
-      document.getElementById("preset-json-view").value = "";
-      currentPreset = null;
-      currentPresetId = null;
-      avatarLayerId = null;
+    function loadImageFromSrc(src) {
+      return new Promise((resolve, reject) => {
+        const img = new Image();
+        img.onload = () => resolve(img);
+        img.onerror = reject;
+        img.src = src;
+      });
     }
 
-    /**
-     * 解析「冒号后」内容；若整体被英文双引号包裹则只编辑引号内，提交时再包回去。
-     * 无冒号时整段作为可编辑内容（兼容旧模板）。
-     */
-    function parseQuotedAfterColon(text) {
-      const raw = String(text ?? "");
-      const m = raw.match(/^([\s\S]+?[：:])([\s\S]*)$/);
-      if (!m) {
-        return { mode: "full", full: raw };
+    function imageToDataUrl(img) {
+      const c = document.createElement("canvas");
+      c.width = img.naturalWidth || img.width;
+      c.height = img.naturalHeight || img.height;
+      c.getContext("2d").drawImage(img, 0, 0);
+      return c.toDataURL("image/png");
+    }
+
+    const CANVAS_PRESET_VERSION = 1;
+
+    const undoStack = [];
+    const MAX_UNDO = 40;
+    let isUndoing = false;
+    let arrowUndoPushed = false;
+    let arrowUndoTimer = null;
+
+    function pushUndo() {
+      if (isUndoing) return;
+      const snap = serializeCanvasPreset();
+      undoStack.push(JSON.stringify(snap));
+      if (undoStack.length > MAX_UNDO) undoStack.shift();
+    }
+
+    async function undoAction() {
+      if (undoStack.length === 0 || isUndoing) return;
+      isUndoing = true;
+      try {
+        const json = undoStack.pop();
+        if (!json) return;
+        await applyCanvasPreset(JSON.parse(json));
+      } finally {
+        isUndoing = false;
       }
-      const prefix = m[1];
-      let rest = m[2].trim();
-      let quoted = false;
-      if (rest.length >= 2 && rest[0] === '"' && rest[rest.length - 1] === '"') {
-        quoted = true;
-        rest = rest.slice(1, -1);
+    }
+
+    function beginArrowMoveUndo() {
+      if (!arrowUndoPushed) {
+        arrowUndoPushed = true;
+        pushUndo();
       }
-      const title = prefix.replace(/[：:]\s*$/, "").trim() || "内容";
-      return { mode: "edit", prefix, value: rest, quoted, title };
+      clearTimeout(arrowUndoTimer);
+      arrowUndoTimer = setTimeout(() => {
+        arrowUndoPushed = false;
+      }, 500);
     }
 
-    function rebuildQuotedAfterColon(parsed, newValue) {
-      if (parsed.mode === "full") return String(newValue ?? "");
-      const v = String(newValue ?? "");
-      if (parsed.quoted) return parsed.prefix + '"' + v + '"';
-      return parsed.prefix + v;
+    function serializeCanvasPreset() {
+      const bgImageDataUrl = state.bgImage ? imageToDataUrl(state.bgImage) : null;
+      const layers = [];
+      for (const layer of state.layers) {
+        if (layer.type === "text") {
+          layers.push({
+            type: "text",
+            id: layer.id,
+            text: layer.text,
+            x: layer.x,
+            y: layer.y,
+            fontSize: layer.fontSize,
+            fontFamily: layer.fontFamily,
+            color: layer.color,
+            scale: layer.scale,
+            rotation: layer.rotation,
+            opacity: layer.opacity,
+            bold: layer.bold
+          });
+        } else {
+          const imgObj = {
+            type: "image",
+            id: layer.id,
+            x: layer.x,
+            y: layer.y,
+            w: layer.w,
+            h: layer.h,
+            scale: layer.scale,
+            rotation: layer.rotation,
+            opacity: layer.opacity,
+            blurPx: layer.blurPx ?? 0,
+            brightness: layer.brightness ?? 1,
+            grayscale: layer.grayscale ?? 0,
+            dataUrl: imageToDataUrl(layer.img)
+          };
+          if (layer.fileName) imgObj.fileName = layer.fileName;
+          if (layer.isQrLayer && layer.qrCertId != null && layer.qrUrlTpl != null) {
+            imgObj.isQrLayer = true;
+            imgObj.qrCertId = layer.qrCertId;
+            imgObj.qrUrlTpl = layer.qrUrlTpl;
+          }
+          layers.push(imgObj);
+        }
+      }
+      return {
+        version: CANVAS_PRESET_VERSION,
+        canvas: { width: canvas.width, height: canvas.height },
+        bgColor: state.bgColor,
+        bgImageDataUrl,
+        ui: {
+          certId: ui.certIdValue.value,
+          imageUrlTpl: ui.imageUrlTpl.value
+        },
+        layers
+      };
     }
 
-    function avatarLayerStemHint(layer) {
-      const raw = (layer && (layer.fileName || layer.name || layer.label || "")) + "";
-      const base = raw.split(/[/\\]/).pop() || raw;
-      return base.replace(/\.(png|jpg|jpeg|webp|gif)$/i, "").toLowerCase();
+    function safePresetFileStem(name) {
+      const s = String(name || "").trim();
+      const cleaned = s.replace(/[<>:"/\\|?*\x00-\x1f]/g, "_").replace(/\s+/g, " ");
+      return cleaned.slice(0, 80) || "template";
     }
 
-    /**
-     * 仅识别制图导出时写入的 fileName（如 头像.png）：去扩展名后必须等于「头像」。
-     * 不用画布坐标猜测，避免换错图层。
-     */
-    function resolveAvatarLayer(images) {
-      const list = (images || []).filter((x) => x.type === "image");
-      const nonQr = list.filter((x) => !x.isQrLayer);
-      for (const x of nonQr) {
-        if (avatarLayerStemHint(x) === "头像") return x;
+    function formatJsonSizeBytes(bytes) {
+      const n = Number(bytes) || 0;
+      if (n < 1024) return n + " B";
+      if (n < 1024 * 1024) return (n / 1024).toFixed(1) + " KB";
+      return (n / 1024 / 1024).toFixed(2) + " MB";
+    }
+
+    function deepClone(o) {
+      return JSON.parse(JSON.stringify(o));
+    }
+
+    function escapeHtml(s) {
+      return String(s)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;");
+    }
+
+    function openSynthEditor() {
+      const root = document.getElementById("appRoot");
+      if (root) root.classList.remove("preset-only");
+    }
+
+    function closeSynthEditor() {
+      const root = document.getElementById("appRoot");
+      if (root) root.classList.add("preset-only");
+    }
+
+    function getBlankCanvasPreset() {
+      return {
+        version: CANVAS_PRESET_VERSION,
+        canvas: { width: 1280, height: 980 },
+        bgColor: "#f5f5f5",
+        bgImageDataUrl: null,
+        ui: { certId: "", imageUrlTpl: "" },
+        layers: []
+      };
+    }
+
+    async function prepareNewTemplateDesign() {
+      loadedFromLibraryId = null;
+      quickPresetBase = null;
+      quickAvatarDataUrl = null;
+      selectedLibraryId = null;
+      ui.quickPresetTitle.textContent = "";
+      ui.quickCertId.value = "";
+      ui.quickAvatarInput.value = "";
+      ui.quickAvatarHint.textContent = "";
+      ui.quickUploadMsg.textContent = "";
+      if (ui.quickAvatarPreviewWrap) {
+        ui.quickAvatarPreviewWrap.style.display = "none";
+        if (ui.quickAvatarPreview) ui.quickAvatarPreview.removeAttribute("src");
+      }
+      renderQuickTextFields({ layers: [] });
+      pushUndo();
+      await applyCanvasPreset(getBlankCanvasPreset());
+      await renderPresetList();
+      updateQuickQrSectionVisibility();
+    }
+
+    const PRESET_IDB = "canvas_preset_dir_v1";
+    const PRESET_IDB_STORE = "handles";
+
+    function idbOpen() {
+      return new Promise((res, rej) => {
+        const r = indexedDB.open(PRESET_IDB, 1);
+        r.onerror = () => rej(r.error);
+        r.onsuccess = () => res(r.result);
+        r.onupgradeneeded = () => {
+          if (!r.result.objectStoreNames.contains(PRESET_IDB_STORE)) {
+            r.result.createObjectStore(PRESET_IDB_STORE);
+          }
+        };
+      });
+    }
+
+    async function idbSetDirHandle(handle) {
+      const db = await idbOpen();
+      return new Promise((res, rej) => {
+        const tx = db.transaction(PRESET_IDB_STORE, "readwrite");
+        tx.objectStore(PRESET_IDB_STORE).put(handle, "presetDir");
+        tx.oncomplete = () => res();
+        tx.onerror = () => rej(tx.error);
+      });
+    }
+
+    async function idbGetDirHandle() {
+      const db = await idbOpen();
+      return new Promise((res, rej) => {
+        const tx = db.transaction(PRESET_IDB_STORE, "readonly");
+        const q = tx.objectStore(PRESET_IDB_STORE).get("presetDir");
+        q.onsuccess = () => res(q.result || null);
+        q.onerror = () => rej(q.error);
+      });
+    }
+
+    async function ensurePresetDirAccess() {
+      if (!presetDirHandle) return false;
+      try {
+        const st = await presetDirHandle.queryPermission({ mode: "readwrite" });
+        if (st === "granted") return true;
+        const st2 = await presetDirHandle.requestPermission({ mode: "readwrite" });
+        return st2 === "granted";
+      } catch {
+        return false;
+      }
+    }
+
+    function revokePreviewBlobs() {
+      lastPreviewBlobUrls.forEach((u) => {
+        try {
+          URL.revokeObjectURL(u);
+        } catch (_) {}
+      });
+      lastPreviewBlobUrls = [];
+    }
+
+    async function listPresetsFromDir(dirHandle) {
+      const items = [];
+      for await (const entry of dirHandle.values()) {
+        if (entry.kind !== "file") continue;
+        const fn = entry.name;
+        if (!fn.toLowerCase().endsWith(".json")) continue;
+        const stem = fn.slice(0, -5);
+        const file = await entry.getFile();
+        let previewBlobUrl = null;
+        for (const ext of [".png", ".jpg", ".jpeg", ".webp", ".gif"]) {
+          try {
+            const ph = await dirHandle.getFileHandle(stem + ext);
+            const imgFile = await ph.getFile();
+            previewBlobUrl = URL.createObjectURL(imgFile);
+            break;
+          } catch (_) {
+            /* continue */
+          }
+        }
+        items.push({
+          id: stem,
+          name: stem,
+          updatedAt: file.lastModified,
+          size: file.size,
+          previewBlobUrl
+        });
+      }
+      items.sort((a, b) => b.updatedAt - a.updatedAt);
+      return items;
+    }
+
+    async function readPresetJsonFromDir(dirHandle, id) {
+      const fh = await dirHandle.getFileHandle(id + ".json");
+      const file = await fh.getFile();
+      return JSON.parse(await file.text());
+    }
+
+    async function writePresetJsonToDir(dirHandle, stem, data) {
+      const fh = await dirHandle.getFileHandle(stem + ".json", { create: true });
+      const w = await fh.createWritable();
+      await w.write(JSON.stringify(data));
+      await w.close();
+    }
+
+    async function fileExistsInDir(dirHandle, name) {
+      try {
+        await dirHandle.getFileHandle(name);
+        return true;
+      } catch {
+        return false;
+      }
+    }
+
+    async function postPresetToFolder(name, data) {
+      if (!presetDirHandle) throw new Error("请先选择预设文件夹");
+      const ok = await ensurePresetDirAccess();
+      if (!ok) throw new Error("无法访问文件夹，请重新选择");
+      const stem = safePresetFileStem(name);
+      const exists = await fileExistsInDir(presetDirHandle, stem + ".json");
+      if (exists) return { conflict: true, id: stem };
+      await writePresetJsonToDir(presetDirHandle, stem, data);
+      return { ok: true, id: stem };
+    }
+
+    async function putPresetToFolder(id, data) {
+      if (!presetDirHandle) throw new Error("请先选择预设文件夹");
+      const ok = await ensurePresetDirAccess();
+      if (!ok) throw new Error("无法访问文件夹，请重新选择");
+      await writePresetJsonToDir(presetDirHandle, safePresetFileStem(id), data);
+    }
+
+    async function deletePresetFromFolder(id) {
+      if (!presetDirHandle) throw new Error("请先选择预设文件夹");
+      const ok = await ensurePresetDirAccess();
+      if (!ok) throw new Error("无法访问文件夹，请重新选择");
+      await presetDirHandle.removeEntry(id + ".json");
+    }
+
+    function stemFromFileName(fn) {
+      if (!fn) return "";
+      const s = String(fn).replace(/[/\\]/g, "");
+      const i = s.lastIndexOf(".");
+      return i > 0 ? s.slice(0, i) : s;
+    }
+
+    function findAvatarLayerId(layers) {
+      for (const L of layers || []) {
+        if (L.type !== "image" || L.isQrLayer) continue;
+        if (stemFromFileName(L.fileName) === "头像") return L.id;
+      }
+      for (const L of layers || []) {
+        if (L.type === "image" && !L.isQrLayer) return L.id;
       }
       return null;
     }
 
-    function renderPresetForm(preset) {
-      const box = document.getElementById("preset-form");
-      const jsonView = document.getElementById("preset-json-view");
-      box.innerHTML = "";
-      jsonView.value = "";
-      avatarLayerId = null;
+    function presetHasQrLayer(preset) {
+      if (!preset || !preset.layers) return false;
+      return preset.layers.some((l) => l.type === "image" && l.isQrLayer);
+    }
 
-      if (!preset || preset.version !== PRESET_VERSION) {
+    function updateQuickQrSectionVisibility() {
+      if (!ui.quickQrSection) return;
+      const show = !!quickPresetBase && presetHasQrLayer(quickPresetBase);
+      ui.quickQrSection.style.display = show ? "" : "none";
+    }
+
+    async function renderPresetList() {
+      revokePreviewBlobs();
+      ui.presetList.innerHTML = "";
+      if (!presetDirHandle) {
         const p = document.createElement("p");
-        p.className = "pf-err";
-        p.textContent = "无法识别该预设（需 version " + PRESET_VERSION + "）";
-        box.appendChild(p);
-        currentPreset = null;
+        p.className = "small";
+        p.style.padding = "6px 8px";
+        p.textContent =
+          "请点击「选择预设文件夹」，授权后可读写该目录下的 .json。需 Chrome / Edge 等（手机浏览器多数不支持选文件夹）。";
+        ui.presetList.appendChild(p);
         return;
       }
-
-      currentPreset = JSON.parse(JSON.stringify(preset));
-      jsonView.value = JSON.stringify(currentPreset, null, 2);
-
-      const layers = preset.layers || [];
-      const texts = layers.filter((x) => x.type === "text");
-      const images = layers.filter((x) => x.type === "image");
-      const avatarLayer = resolveAvatarLayer(images);
-      const hasQrLayer = images.some((x) => x.isQrLayer);
-      const hasCertTextLine = texts.some((layer) => {
-        const pr = parseQuotedAfterColon(layer.text);
-        return (
-          pr.mode === "edit" &&
-          (pr.title === "证件号" || pr.title === "证件编号")
-        );
-      });
-
-      const intro = document.createElement("p");
-      intro.className = "pf-desc";
-      intro.style.marginTop = "4px";
-      let introTxt =
-        "仅支持含中文或英文冒号的文字行（「标签：" + '"填写内容"' + "」）；此处只改冒号后的内容。";
-      if (hasQrLayer && hasCertTextLine) {
-        introTxt +=
-          " 含「证件号」或「证件编号」行时，引号内的编号会在合成时自动写入二维码。";
-      } else if (hasQrLayer) {
-        introTxt +=
-          " 本预设含二维码：请在下方填写编号，或自己在模板中加一行「证件号：" + '"编号"' + "」。";
+      const granted = await ensurePresetDirAccess();
+      if (!granted) {
+        ui.presetList.innerHTML =
+          '<p class="small" style="padding:8px;color:#b91c1c;">无文件夹访问权限，请重新点击「选择预设文件夹」授权。</p>';
+        return;
       }
-      introTxt += " 头像请在下方选择本地图片（不再从网络拉取大图）。";
-      intro.textContent = introTxt;
-      box.appendChild(intro);
-
-      let colSlot = 0;
-      const editableTexts = texts.filter((layer) => {
-        return parseQuotedAfterColon(layer.text).mode === "edit";
-      });
-      if (editableTexts.length) {
-        const sec = document.createElement("div");
-        sec.className = "pf-section";
-        const h = document.createElement("h4");
-        h.className = "pf-h";
-        h.textContent = "文字（冒号后，引号内）";
-        sec.appendChild(h);
-        editableTexts.forEach((layer) => {
-          const parsed = parseQuotedAfterColon(layer.text);
-          const wrap = document.createElement("div");
-          wrap.className = "pf-layer";
-          const title = document.createElement("div");
-          title.className = "pf-layer-title";
-          title.textContent = parsed.title;
-          const ta = document.createElement("textarea");
-          ta.className = "field-text";
-          ta.id = "field-text-col-" + colSlot;
-          colSlot += 1;
-          ta.value = parsed.value;
-          ta.rows = 2;
-          wrap.appendChild(title);
-          wrap.appendChild(ta);
-          sec.appendChild(wrap);
+      const loading = document.createElement("p");
+      loading.className = "small";
+      loading.style.padding = "6px 8px";
+      loading.textContent = "扫描文件夹…";
+      ui.presetList.appendChild(loading);
+      try {
+        const list = await listPresetsFromDir(presetDirHandle);
+        list.forEach((it) => {
+          if (it.previewBlobUrl) lastPreviewBlobUrls.push(it.previewBlobUrl);
         });
-        box.appendChild(sec);
-      }
-
-      if (avatarLayer) {
-        avatarLayerId = avatarLayer.id;
-        const sec = document.createElement("div");
-        sec.className = "pf-section";
-        const h = document.createElement("h4");
-        h.className = "pf-h";
-        h.textContent = "头像（头像.png）";
-        sec.appendChild(h);
-        const hint = document.createElement("p");
-        hint.className = "pf-desc";
-        hint.textContent = hasQrLayer
-          ? "请选择证件照/头像；选图后下方显示预览。若已填写证件号，二维码会随编号自动更新。"
-          : "请选择证件照/头像；选图后下方显示预览。";
-        sec.appendChild(hint);
-        const im = document.createElement("img");
-        im.className = "pf-thumb";
-        im.id = "avatar-preview-img";
-        im.alt = "头像预览";
-        im.style.display = "none";
-        sec.appendChild(im);
-        const lf = document.createElement("label");
-        lf.className = "field";
-        lf.textContent = "选择本地图片";
-        const fi = document.createElement("input");
-        fi.type = "file";
-        fi.id = "field-avatar";
-        fi.accept = "image/*";
-        fi.addEventListener("change", () => {
-          const f = fi.files && fi.files[0];
-          if (!f) {
-            im.style.display = "none";
-            im.removeAttribute("src");
-            return;
+        ui.presetList.innerHTML = "";
+        if (!list.length) {
+          const p = document.createElement("p");
+          p.className = "small";
+          p.style.padding = "6px 8px";
+          p.textContent =
+            "该文件夹中暂无 .json。可在模板设计 → 导出画布预设，或将 JSON 拷入此文件夹（列表会自动扫描更新）。";
+          ui.presetList.appendChild(p);
+          return;
+        }
+        list.forEach((item) => {
+          const row = document.createElement("div");
+          row.className = "preset-item" + (selectedLibraryId === item.id ? " active" : "");
+          if (item.previewBlobUrl) {
+            const thumb = document.createElement("img");
+            thumb.src = item.previewBlobUrl;
+            thumb.alt = "";
+            thumb.style.width = "36px";
+            thumb.style.height = "36px";
+            thumb.style.objectFit = "cover";
+            thumb.style.borderRadius = "4px";
+            thumb.style.flexShrink = "0";
+            row.appendChild(thumb);
           }
-          const r = new FileReader();
-          r.onload = () => {
-            im.src = r.result;
-            im.style.display = "block";
-          };
-          r.readAsDataURL(f);
+          const nameBtn = document.createElement("button");
+          nameBtn.type = "button";
+          nameBtn.className = "preset-item-name";
+          nameBtn.textContent = item.name;
+          nameBtn.addEventListener("click", () => openQuickComposeWithPreset(item.id));
+          row.appendChild(nameBtn);
+          ui.presetList.appendChild(row);
         });
-        sec.appendChild(lf);
-        sec.appendChild(fi);
-        box.appendChild(sec);
-      } else if (images.length) {
-        const sec = document.createElement("div");
-        sec.className = "pf-section";
-        const p = document.createElement("p");
-        p.className = "pf-desc";
-        p.textContent =
-          "当前预设里没有标记为「头像.png」的图片图层（JSON 需含 fileName）。请在制图页用「添加图片」选择文件名为 头像.png 的图片，导出预设后再加载；或中枢仅含一张非二维码照片时，与 头像.png 同目录可自动补全。";
-        sec.appendChild(p);
-        box.appendChild(sec);
-      }
-
-      if (hasQrLayer && !hasCertTextLine) {
-        const sec = document.createElement("div");
-        sec.className = "pf-section";
-        const h = document.createElement("h4");
-        h.className = "pf-h";
-        h.textContent = "二维码编号";
-        sec.appendChild(h);
-        const d = document.createElement("p");
-        d.className = "pf-desc";
-        d.textContent =
-          "模板中未单独做「证件号」文字行时，在此填写要写入二维码的编号（与导出预设里的 URL 模板 {id} 对应）。";
-        sec.appendChild(d);
-        const inp = document.createElement("input");
-        inp.type = "text";
-        inp.id = "field-qr-cert";
-        inp.autocomplete = "off";
-        inp.placeholder = "输入编号";
-        const ui0 = preset.ui || {};
-        inp.value = ui0.certId != null ? String(ui0.certId) : "";
-        sec.appendChild(inp);
-        box.appendChild(sec);
-      }
-
-      const canSubmitSomething =
-        editableTexts.length > 0 || avatarLayer || hasQrLayer;
-      if (!canSubmitSomething) {
-        const sec = document.createElement("div");
-        sec.className = "pf-section";
-        const p = document.createElement("p");
-        p.className = "pf-err";
-        p.textContent = "该预设没有可填写的文字、头像或二维码编号。";
-        sec.appendChild(p);
-        box.appendChild(sec);
+      } catch (e) {
+        ui.presetList.innerHTML =
+          '<p class="small" style="padding:8px;color:#b91c1c;">' +
+          escapeHtml(e.message || String(e)) +
+          "</p>";
       }
     }
 
-    async function buildPresetFromForm() {
-      if (!currentPreset) throw new Error("未加载预设");
-      const p = JSON.parse(JSON.stringify(currentPreset));
+    function setAppMode(mode) {
+      appMode = mode;
+      ui.panelDesign.style.display = mode === "design" ? "block" : "none";
+      ui.panelQuick.style.display = mode === "quick" ? "block" : "none";
+    }
 
-      let colSlot = 0;
-      for (const layer of p.layers || []) {
-        if (layer.type === "text") {
-          const parsed = parseQuotedAfterColon(layer.text);
-          if (parsed.mode === "edit") {
-            const te = document.getElementById("field-text-col-" + colSlot);
-            colSlot += 1;
-            if (te && parsed) {
-              layer.text = rebuildQuotedAfterColon(parsed, te.value);
-            }
+    async function loadPresetIntoDesign(id) {
+      if (!presetDirHandle) {
+        alert("请先选择预设文件夹。");
+        return;
+      }
+      openSynthEditor();
+      try {
+        const data = await readPresetJsonFromDir(presetDirHandle, id);
+        loadedFromLibraryId = id;
+        selectedLibraryId = id;
+        pushUndo();
+        await applyCanvasPreset(deepClone(data));
+        setAppMode("design");
+        await renderPresetList();
+      } catch (e) {
+        alert("加载失败：" + (e.message || e));
+      }
+    }
+
+    async function openQuickComposeWithPreset(id) {
+      if (!presetDirHandle) {
+        alert("请先选择预设文件夹。");
+        return;
+      }
+      openSynthEditor();
+      try {
+        const data = await readPresetJsonFromDir(presetDirHandle, id);
+        selectedLibraryId = id;
+        quickPresetBase = deepClone(data);
+        ui.quickPresetTitle.textContent = "当前预设：" + id;
+        if (presetHasQrLayer(data)) {
+          const uiCert = data.ui && data.ui.certId != null ? String(data.ui.certId) : "";
+          ui.quickCertId.value = uiCert;
+        } else {
+          ui.quickCertId.value = "";
+        }
+        quickAvatarDataUrl = null;
+        ui.quickAvatarInput.value = "";
+        if (ui.quickAvatarPreviewWrap) {
+          ui.quickAvatarPreviewWrap.style.display = "none";
+          if (ui.quickAvatarPreview) ui.quickAvatarPreview.removeAttribute("src");
+        }
+        renderQuickTextFields(quickPresetBase);
+        const aid = findAvatarLayerId(quickPresetBase.layers || []);
+        const layer = aid ? (quickPresetBase.layers || []).find((l) => l.id === aid) : null;
+        ui.quickAvatarHint.textContent = aid
+          ? "将替换头像图层（fileName：" + (layer && layer.fileName ? layer.fileName : "未命名") + "）"
+          : "未识别头像图层：请在模板设计里用「添加图片」选择文件名为 头像.png 的图片，再保存到预设文件夹。";
+        ui.quickUploadMsg.textContent = "";
+        updateQuickQrSectionVisibility();
+        pushUndo();
+        await applyCanvasPreset(deepClone(data));
+        setAppMode("quick");
+        await renderPresetList();
+      } catch (e) {
+        alert("加载失败：" + (e.message || e));
+      }
+    }
+
+    function renderQuickTextFields(preset) {
+      const box = ui.quickTextFields;
+      box.innerHTML = "";
+      (preset.layers || []).forEach((layer) => {
+        if (layer.type !== "text") return;
+        const lines = String(layer.text || "").split(/\r?\n/);
+        lines.forEach((line, lineIdx) => {
+          const m = line.match(/^([\s\S]*?[：:])([\s\S]*)$/);
+          const wrap = document.createElement("div");
+          wrap.className = "row";
+          wrap.style.marginBottom = "6px";
+          wrap.style.flexDirection = "column";
+          wrap.style.alignItems = "stretch";
+          const inp = document.createElement("input");
+          inp.type = "text";
+          inp.setAttribute("data-layer-id", layer.id);
+          inp.setAttribute("data-line-index", String(lineIdx));
+          if (m) {
+            const lab = document.createElement("label");
+            lab.textContent = m[1].trim() + " ";
+            lab.style.fontSize = "11px";
+            lab.style.color = "var(--muted)";
+            inp.value = m[2];
+            inp.setAttribute("data-prefix", m[1]);
+            wrap.appendChild(lab);
+            wrap.appendChild(inp);
+          } else {
+            const lab = document.createElement("label");
+            lab.textContent = "整行（无冒号分隔）";
+            lab.style.fontSize = "11px";
+            lab.style.color = "var(--muted)";
+            inp.value = line;
+            inp.setAttribute("data-full-line", "1");
+            wrap.appendChild(lab);
+            wrap.appendChild(inp);
           }
-        }
-        if (layer.type === "image" && avatarLayerId && layer.id === avatarLayerId) {
-          const fe = document.getElementById("field-avatar");
-          if (fe && fe.files && fe.files[0]) {
-            layer.dataUrl = await fileToDataUrl(fe.files[0]);
-          }
-        }
+          box.appendChild(wrap);
+        });
+      });
+      if (!box.children.length) {
+        const p = document.createElement("p");
+        p.className = "small";
+        p.textContent = "该预设没有文字图层，或无需快速编辑。";
+        box.appendChild(p);
       }
+    }
 
-      p.ui = p.ui || {};
-      colSlot = 0;
+    function mergeQuickTextIntoPreset(preset) {
+      const p = deepClone(preset);
+      const byLayer = {};
+      ui.quickTextFields.querySelectorAll("input[data-layer-id]").forEach((inp) => {
+        const lid = inp.getAttribute("data-layer-id");
+        const li = Number(inp.getAttribute("data-line-index"));
+        if (!lid || Number.isNaN(li)) return;
+        if (!byLayer[lid]) byLayer[lid] = {};
+        byLayer[lid][li] = {
+          value: inp.value,
+          prefix: inp.getAttribute("data-prefix"),
+          fullLine: inp.getAttribute("data-full-line") === "1"
+        };
+      });
       for (const layer of p.layers || []) {
-        if (layer.type !== "text") continue;
-        const parsed = parseQuotedAfterColon(layer.text);
-        if (parsed.mode !== "edit") continue;
-        const te = document.getElementById("field-text-col-" + colSlot);
-        colSlot += 1;
-        if (!te || !parsed) continue;
-        const t = String(parsed.title || "").replace(/\s/g, "");
-        if (t === "证件号" || t === "证件编号") {
-          p.ui.certId = String(te.value || "").trim();
-          break;
+        if (layer.type !== "text" || !byLayer[layer.id]) continue;
+        const lines = String(layer.text || "").split(/\r?\n/);
+        const edits = byLayer[layer.id];
+        for (const idxStr of Object.keys(edits)) {
+          const idx = Number(idxStr);
+          const ed = edits[idx];
+          if (lines[idx] === undefined) continue;
+          if (ed.fullLine) lines[idx] = ed.value;
+          else lines[idx] = (ed.prefix || "") + ed.value;
         }
+        layer.text = lines.join("\n");
       }
-      const qrField = document.getElementById("field-qr-cert");
-      if (qrField && String(qrField.value || "").trim()) {
-        if (!p.ui.certId) p.ui.certId = String(qrField.value || "").trim();
-      }
-
       return p;
     }
 
-    document.getElementById("submit-btn").addEventListener("click", async () => {
-      if (!conn || !conn.open) return;
-      setMsg("");
-      document.getElementById("submit-btn").disabled = true;
-      startRenderProgressUI("正在准备数据…");
+    async function runQuickCompose() {
+      if (!quickPresetBase) {
+        alert("请先在左侧预设库中点击一个预设名称。");
+        return;
+      }
+      let p = mergeQuickTextIntoPreset(quickPresetBase);
+      if (!p.ui) p.ui = {};
+      p.ui.certId = ui.quickCertId.value.trim();
+      p.ui.imageUrlTpl =
+        quickPresetBase.ui && quickPresetBase.ui.imageUrlTpl != null
+          ? quickPresetBase.ui.imageUrlTpl
+          : ui.imageUrlTpl.value;
+      const aid = findAvatarLayerId(p.layers || []);
+      if (aid && quickAvatarDataUrl) {
+        const L = (p.layers || []).find((l) => l.id === aid);
+        if (L) L.dataUrl = quickAvatarDataUrl;
+      }
+      pushUndo();
+      await applyCanvasPreset(p);
+    }
+
+    let loadedScriptUrls = {};
+    function loadScriptOnce(src) {
+      if (loadedScriptUrls[src]) return Promise.resolve();
+      return loadScript(src).then(() => {
+        loadedScriptUrls[src] = true;
+      });
+    }
+
+    async function downloadPdfFromCanvas() {
+      await loadScriptOnce("https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js");
+      if (!window.jspdf || !window.jspdf.jsPDF) {
+        alert("PDF 库加载失败");
+        return;
+      }
+      const { jsPDF } = window.jspdf;
+      const w = canvas.width;
+      const h = canvas.height;
+      const pdf = new jsPDF({ orientation: w > h ? "l" : "p", unit: "px", format: [w, h] });
+      pdf.addImage(canvas.toDataURL("image/png"), "PNG", 0, 0, w, h);
+      pdf.save("composite.pdf");
+    }
+
+    async function savePresetToFolder(name, data) {
+      const copy = deepClone(data);
+      copy.name = safePresetFileStem(name);
+      const res = await postPresetToFolder(copy.name, copy);
+      if (res.conflict) {
+        if (window.confirm("文件夹中已存在「" + res.id + ".json」，是否覆盖？")) {
+          await putPresetToFolder(res.id, copy);
+        } else {
+          return;
+        }
+      }
+      await renderPresetList();
+    }
+
+    async function updateLibraryFromCurrentCanvas() {
+      if (!loadedFromLibraryId) {
+        alert("请先在左侧点「编辑」从库中打开一个预设，或选中库项后再更新。");
+        return;
+      }
+      if (!presetDirHandle) {
+        alert("请先选择预设文件夹。");
+        return;
+      }
       try {
-        const preset = await buildPresetFromForm();
-        setRenderProgressText("正在发送到管理端…");
-        if (!conn || !conn.open) {
-          throw new Error("连接已断开，请重新登录");
-        }
-        try {
-          await sendRenderRequestToAdmin(conn, currentPresetId, preset);
-        } catch (sendErr) {
-          console.error(sendErr);
-          renderReqUploadState = null;
-          throw new Error(
-            sendErr.message ||
-              "发送失败（可能数据过大或链路中断）。请缩小图片后重试，或重新登录。"
-          );
-        }
-        setRenderProgressText("已发送，等待管理端处理…");
+        const data = serializeCanvasPreset();
+        data.name = loadedFromLibraryId;
+        await putPresetToFolder(loadedFromLibraryId, data);
+        await renderPresetList();
+        alert("已用当前画布覆盖本地文件「" + loadedFromLibraryId + ".json」。");
       } catch (e) {
-        stopRenderProgressUI();
-        renderReqUploadState = null;
-        setMsg(e.message || String(e));
-        document.getElementById("submit-btn").disabled = false;
+        alert("更新失败：" + (e.message || e));
+      }
+    }
+
+    async function exportPresetToLibraryPrompt() {
+      if (!presetDirHandle) {
+        alert("请先点击「选择预设文件夹」并授权读写。");
+        return;
+      }
+      const raw = window.prompt("请输入预设名称（将保存到当前已选文件夹中的 .json）：", "");
+      if (raw == null) return;
+      const trimmed = String(raw).trim();
+      if (!trimmed) {
+        alert("请输入预设名称。");
+        return;
+      }
+      const data = serializeCanvasPreset();
+      data.name = safePresetFileStem(trimmed);
+      try {
+        const jsonStr = JSON.stringify(data);
+        const sizeBytes = new Blob([jsonStr], { type: "application/json;charset=utf-8" }).size;
+        const sizeText = formatJsonSizeBytes(sizeBytes);
+        if (
+          !window.confirm(
+            "将写入「" +
+              data.name +
+              ".json」到当前文件夹。\nJSON 约 " +
+              sizeText +
+              "（" +
+              sizeBytes.toLocaleString() +
+              " 字节）。确定？"
+          )
+        )
+          return;
+        await savePresetToFolder(data.name, data);
+      } catch (e) {
+        alert("添加失败：" + (e.message || e));
+      }
+    }
+
+    async function applyCanvasPreset(data) {
+      if (!data || data.version !== CANVAS_PRESET_VERSION) {
+        throw new Error("不支持的预设文件（version 需为 " + CANVAS_PRESET_VERSION + "）");
+      }
+      if (data.canvas && data.canvas.width && data.canvas.height) {
+        const w = Number(data.canvas.width);
+        const h = Number(data.canvas.height);
+        if (w >= 300 && h >= 300) {
+          canvas.width = w;
+          canvas.height = h;
+          ui.canvasW.value = w;
+          ui.canvasH.value = h;
+        }
+      }
+      state.bgColor = data.bgColor || "#f5f5f5";
+      ui.bgColor.value = state.bgColor;
+      state.bgImage = null;
+      if (data.bgImageDataUrl) {
+        state.bgImage = await loadImageFromSrc(data.bgImageDataUrl);
+      }
+      if (data.ui) {
+        if (data.ui.certId != null) ui.certIdValue.value = data.ui.certId;
+        if (data.ui.imageUrlTpl != null) ui.imageUrlTpl.value = data.ui.imageUrlTpl;
+      }
+      state.layers = [];
+      state.selectedId = null;
+      state.drag = null;
+      for (const L of data.layers || []) {
+        if (L.type === "text") {
+          state.layers.push({
+            id: L.id || uid(),
+            type: "text",
+            text: L.text,
+            x: L.x,
+            y: L.y,
+            fontSize: L.fontSize,
+            fontFamily: L.fontFamily || "Microsoft YaHei, sans-serif",
+            color: L.color || "#111111",
+            scale: L.scale ?? 1,
+            rotation: L.rotation ?? 0,
+            opacity: L.opacity ?? 1,
+            bold: L.bold !== false
+          });
+        } else if (L.type === "image" && L.dataUrl) {
+          const img = await loadImageFromSrc(L.dataUrl);
+          const layer = {
+            id: L.id || uid(),
+            type: "image",
+            img,
+            x: L.x,
+            y: L.y,
+            w: L.w || img.width,
+            h: L.h || img.height,
+            scale: L.scale ?? 1,
+            rotation: L.rotation ?? 0,
+            opacity: L.opacity ?? 1,
+            blurPx: L.blurPx ?? 0,
+            brightness: L.brightness ?? 1,
+            grayscale: L.grayscale ?? 0
+          };
+          if (L.fileName) layer.fileName = L.fileName;
+          if (L.isQrLayer && L.qrCertId != null && L.qrUrlTpl != null) {
+            layer.isQrLayer = true;
+            layer.qrCertId = L.qrCertId;
+            layer.qrUrlTpl = L.qrUrlTpl;
+          }
+          state.layers.push(layer);
+        }
+      }
+      await refreshQrLayersFromPreset(data);
+      syncSelectedUi();
+      draw();
+    }
+
+    function imageLayerCssFilter(layer) {
+      const parts = [];
+      const blur = layer.blurPx ?? 0;
+      if (blur > 0) parts.push(`blur(${blur}px)`);
+      const gs = layer.grayscale ?? 0;
+      if (gs > 0) parts.push(`grayscale(${Math.min(1, gs)})`);
+      const br = layer.brightness ?? 1;
+      if (br !== 1) parts.push(`brightness(${br})`);
+      return parts.length ? parts.join(" ") : "none";
+    }
+
+    function addImageLayer(img, x = 80, y = 80, scale = 1, fileNameHint) {
+      const layer = {
+        id: uid(),
+        type: "image",
+        img,
+        x,
+        y,
+        w: img.width,
+        h: img.height,
+        scale,
+        rotation: 0,
+        opacity: 1,
+        blurPx: 0,
+        brightness: 1,
+        grayscale: 0
+      };
+      if (fileNameHint) layer.fileName = String(fileNameHint);
+      state.layers.push(layer);
+      state.selectedId = state.layers[state.layers.length - 1].id;
+      syncSelectedUi();
+      draw();
+    }
+
+    function addTextLayer(text, color = "#111111", size = 42, isStamp = false, fontFamilyOverride) {
+      if (!text.trim()) return;
+      const ff = fontFamilyOverride != null
+        ? fontFamilyOverride
+        : getFontFamilyFromPreset(ui.fontFamilyPreset, ui.fontFamilyCustom);
+      state.layers.push({
+        id: uid(),
+        type: "text",
+        text,
+        x: 90,
+        y: 90,
+        fontSize: size,
+        fontFamily: ff,
+        color,
+        scale: 1,
+        rotation: isStamp ? -0.28 : 0,
+        opacity: 1,
+        bold: true
+      });
+      state.selectedId = state.layers[state.layers.length - 1].id;
+      syncSelectedUi();
+      draw();
+    }
+
+    function getLayerById(id) {
+      return state.layers.find((l) => l.id === id) || null;
+    }
+
+    function getPointerPos(e) {
+      const rect = canvas.getBoundingClientRect();
+      return {
+        x: (e.clientX - rect.left) * (canvas.width / rect.width),
+        y: (e.clientY - rect.top) * (canvas.height / rect.height)
+      };
+    }
+
+    function layerBounds(layer) {
+      if (layer.type === "image") {
+        const w = layer.w * layer.scale;
+        const h = layer.h * layer.scale;
+        return { x: layer.x, y: layer.y, w, h };
+      }
+      ctx.save();
+      const fontSize = layer.fontSize * layer.scale;
+      const lineHeight = fontSize * 1.2;
+      const lines = String(layer.text).split("\n");
+      ctx.font = `${layer.bold ? "700" : "400"} ${fontSize}px ${layer.fontFamily}`;
+      let w = 0;
+      lines.forEach((line) => {
+        w = Math.max(w, ctx.measureText(line).width);
+      });
+      const h = Math.max(lineHeight, lineHeight * lines.length);
+      ctx.restore();
+      return { x: layer.x, y: layer.y - lineHeight, w, h };
+    }
+
+    function hitTest(x, y) {
+      for (let i = state.layers.length - 1; i >= 0; i--) {
+        const b = layerBounds(state.layers[i]);
+        if (x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h) return state.layers[i];
+      }
+      return null;
+    }
+
+    function isTypingTarget(el) {
+      if (!el) return false;
+      const tag = el.tagName ? el.tagName.toUpperCase() : "";
+      return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || el.isContentEditable;
+    }
+
+    function drawBackgroundPattern() {
+      const step = 80;
+      ctx.save();
+      ctx.strokeStyle = "rgba(120,120,120,0.12)";
+      ctx.lineWidth = 1;
+      for (let x = 0; x < canvas.width + step; x += step) {
+        for (let y = 0; y < canvas.height + step; y += step) {
+          ctx.beginPath();
+          ctx.arc(x, y, 34, 0, Math.PI * 2);
+          ctx.stroke();
+        }
+      }
+      ctx.restore();
+    }
+
+    function canvasToImage(canvasEl) {
+      return new Promise((resolve, reject) => {
+        const img = new Image();
+        img.onload = () => resolve(img);
+        img.onerror = reject;
+        img.src = canvasEl.toDataURL("image/png");
+      });
+    }
+
+    function buildImageUrlFromParts(certId, tpl) {
+      const c = String(certId || "").trim();
+      const t = String(tpl || "").trim();
+      if (!c) return { ok: false, msg: "请先输入证件编号" };
+      if (!t) return { ok: false, msg: "请先输入URL模板，模板中用 {id} 表示编号" };
+      if (!t.includes("{id}")) return { ok: false, msg: "URL模板缺少 {id} 占位符" };
+      return { ok: true, imageUrl: t.replaceAll("{id}", encodeURIComponent(c)) };
+    }
+
+    function buildImageUrl() {
+      return buildImageUrlFromParts(ui.certIdValue.value, ui.imageUrlTpl.value);
+    }
+
+    function buildQrPayload() {
+      const built = buildImageUrl();
+      if (!built.ok) return built;
+      return { ok: true, payload: built.imageUrl };
+    }
+
+    async function renderQrToCanvas(canvasEl, payload, size = 180) {
+      if (window.QRCode && window.QRCode.toCanvas) {
+        await window.QRCode.toCanvas(canvasEl, payload, {
+          width: size,
+          margin: 1,
+          errorCorrectionLevel: "M"
+        });
+        return true;
+      }
+
+      if (typeof window.qrcode === "function") {
+        const qr = window.qrcode(0, "M");
+        qr.addData(payload);
+        qr.make();
+        const count = qr.getModuleCount();
+        const ctx2 = canvasEl.getContext("2d");
+        const margin = 1;
+        const cell = Math.max(1, Math.floor(size / (count + margin * 2)));
+        const drawSize = cell * (count + margin * 2);
+        canvasEl.width = drawSize;
+        canvasEl.height = drawSize;
+        ctx2.fillStyle = "#ffffff";
+        ctx2.fillRect(0, 0, drawSize, drawSize);
+        ctx2.fillStyle = "#000000";
+        for (let r = 0; r < count; r++) {
+          for (let c = 0; c < count; c++) {
+            if (qr.isDark(r, c)) {
+              ctx2.fillRect((c + margin) * cell, (r + margin) * cell, cell, cell);
+            }
+          }
+        }
+        return true;
+      }
+      return false;
+    }
+
+    function loadScript(src) {
+      return new Promise((resolve, reject) => {
+        const s = document.createElement("script");
+        s.src = src;
+        s.async = true;
+        s.onload = resolve;
+        s.onerror = reject;
+        document.head.appendChild(s);
+      });
+    }
+
+    async function ensureQrLib() {
+      if ((window.QRCode && window.QRCode.toCanvas) || typeof window.qrcode === "function") {
+        qrReady = true;
+        return true;
+      }
+      const cdnList = [
+        "https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js",
+        "https://unpkg.com/qrcode@1.5.3/build/qrcode.min.js",
+        "https://cdn.bootcdn.net/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"
+      ];
+      for (const src of cdnList) {
+        try {
+          await loadScript(src);
+          if ((window.QRCode && window.QRCode.toCanvas) || typeof window.qrcode === "function") {
+            qrReady = true;
+            return true;
+          }
+        } catch (_) {
+          // try next source
+        }
+      }
+      qrReady = false;
+      return false;
+    }
+
+    /**
+     * 合成/嵌入渲染时：若预设含二维码图层且 ui.certId 有值，按 URL 模板重新生成二维码图（与主界面「更新二维码」一致）。
+     */
+    async function refreshQrLayersFromPreset(data) {
+      const layers = state.layers || [];
+      const hasQr = layers.some(
+        (l) => l.type === "image" && l.isQrLayer && l.qrUrlTpl != null
+      );
+      if (!hasQr) return;
+
+      const certId =
+        data && data.ui && data.ui.certId != null ? String(data.ui.certId).trim() : "";
+      if (!certId) return;
+
+      const globalTpl =
+        data && data.ui && data.ui.imageUrlTpl != null
+          ? String(data.ui.imageUrlTpl).trim()
+          : "";
+      const ready = await ensureQrLib();
+      if (!ready) return;
+
+      for (const layer of layers) {
+        if (layer.type !== "image" || !layer.isQrLayer || layer.qrUrlTpl == null) continue;
+        const tpl = String(layer.qrUrlTpl).trim() || globalTpl;
+        const built = buildImageUrlFromParts(certId, tpl);
+        if (!built.ok) continue;
+        const ok = await renderQrToCanvas(ui.qrCanvas, built.imageUrl, 180);
+        if (!ok) continue;
+        const qrImg = await canvasToImage(ui.qrCanvas);
+        const oldW = layer.w * layer.scale;
+        const oldH = layer.h * layer.scale;
+        layer.img = qrImg;
+        layer.w = qrImg.width;
+        layer.h = qrImg.height;
+        layer.scale = oldW / qrImg.width;
+        layer.qrCertId = certId;
+        layer.qrUrlTpl = tpl;
+      }
+    }
+
+    function draw() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      ctx.fillStyle = state.bgColor;
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+      if (state.bgImage) {
+        ctx.drawImage(state.bgImage, 0, 0, canvas.width, canvas.height);
+      } else {
+        drawBackgroundPattern();
+      }
+
+      for (const layer of state.layers) {
+        ctx.save();
+        ctx.globalAlpha = layer.opacity;
+        if (layer.type === "image") {
+          const dw = layer.w * layer.scale;
+          const dh = layer.h * layer.scale;
+          ctx.filter = imageLayerCssFilter(layer);
+          ctx.translate(layer.x + dw / 2, layer.y + dh / 2);
+          ctx.rotate(layer.rotation);
+          if (layer.isQrLayer) {
+            ctx.drawImage(layer.img, -dw / 2, -dh / 2, dw, dh);
+          } else {
+            const iw = layer.img.naturalWidth || layer.img.width;
+            const ih = layer.img.naturalHeight || layer.img.height;
+            if (iw > 0 && ih > 0) {
+              const s = Math.min(dw / iw, dh / ih);
+              const sw = iw * s;
+              const sh = ih * s;
+              const ox = (dw - sw) / 2;
+              const oy = (dh - sh) / 2;
+              ctx.drawImage(layer.img, -dw / 2 + ox, -dh / 2 + oy, sw, sh);
+            } else {
+              ctx.drawImage(layer.img, -dw / 2, -dh / 2, dw, dh);
+            }
+          }
+        } else {
+          const fontSize = layer.fontSize * layer.scale;
+          const lineHeight = fontSize * 1.2;
+          const lines = String(layer.text).split("\n");
+          ctx.font = `${layer.bold ? "700" : "400"} ${fontSize}px ${layer.fontFamily}`;
+          ctx.fillStyle = layer.color;
+          ctx.translate(layer.x, layer.y);
+          ctx.rotate(layer.rotation);
+          lines.forEach((line, idx) => {
+            ctx.fillText(line, 0, idx * lineHeight);
+          });
+        }
+        ctx.restore();
+      }
+
+      const selected = getLayerById(state.selectedId);
+      if (selected) {
+        const b = layerBounds(selected);
+        ctx.save();
+        ctx.strokeStyle = "#2563eb";
+        ctx.lineWidth = 2;
+        ctx.setLineDash([8, 6]);
+        ctx.strokeRect(b.x - 4, b.y - 4, b.w + 8, b.h + 8);
+        ctx.restore();
+      }
+    }
+
+    function syncSelectedUi() {
+      syncingUi = true;
+      try {
+        const s = getLayerById(state.selectedId);
+        const scale = s ? Math.round(s.scale * 100) : 100;
+        const opacity = s ? Math.round(s.opacity * 100) : 100;
+        ui.scaleRange.value = scale;
+        ui.opacityRange.value = opacity;
+        ui.qrScaleRange.value = scale;
+        ui.qrOpacityRange.value = opacity;
+
+        const isQr =
+          s &&
+          s.type === "image" &&
+          s.isQrLayer &&
+          s.qrCertId != null &&
+          s.qrUrlTpl != null;
+
+        ui.panelText.classList.toggle("panel-dim", !!isQr);
+        ui.panelImage.classList.toggle("panel-dim", !!isQr);
+
+        if (isQr) {
+          ui.selectedImageBlock.style.display = "none";
+          ui.qrLayerToolbar.style.display = "block";
+          ui.onlineQrIntro.style.display = "none";
+          ui.certIdValue.value = s.qrCertId;
+          ui.imageUrlTpl.value = s.qrUrlTpl;
+          ui.qrSyncHint.style.display = "block";
+          ui.imageModeHint.innerHTML =
+            "当前选中的是<strong>二维码图层</strong>，请在下方填写编号与 URL，并点「更新选中二维码」。";
+        } else {
+          ui.qrLayerToolbar.style.display = "none";
+          ui.onlineQrIntro.style.display = "";
+          ui.qrSyncHint.style.display = "none";
+        }
+
+        if (s && s.type === "text") {
+          ui.textValue.value = s.text;
+          ui.fontSize.value = String(s.fontSize);
+          ui.fontColor.value = s.color;
+          applyFontPresetFromLayer(s);
+          ui.textModeHint.innerHTML =
+            "正在编辑画布上的<strong>文字图层</strong>，修改内容、字号、颜色或字体会立即生效。";
+        } else {
+          ui.textModeHint.innerHTML =
+            "未选中文字图层时，下方选项用于<strong>下一次添加</strong>；点击画布上的文字即可在此编辑。";
+        }
+
+        if (s && s.type === "image" && !isQr) {
+          ui.selectedImageBlock.style.display = "block";
+          ui.imageRotationDeg.value = String(Math.round((s.rotation * 180) / Math.PI));
+          ui.imageBlurPx.value = String(s.blurPx ?? 0);
+          ui.imageGrayscale.value = String(Math.round((s.grayscale ?? 0) * 100));
+          ui.imageBrightness.value = String(Math.round((s.brightness ?? 1) * 100));
+          ui.imageModeHint.innerHTML =
+            "正在编辑画布上的<strong>图片图层</strong>，可替换图片或调节旋转、模糊、灰度、亮度。";
+        } else if (!isQr) {
+          ui.selectedImageBlock.style.display = "none";
+          ui.imageModeHint.innerHTML =
+            "未选中图片图层时，选择文件将<strong>添加新图片</strong>；点击画布上的普通图片即可在此编辑。";
+        }
+
+        if (s && !isQr) {
+          ui.layerTransformSection.style.display = "block";
+        } else {
+          ui.layerTransformSection.style.display = "none";
+        }
+
+        ui.updateSelectedQrBtn.disabled = !isQr;
+        ui.updateSelectedQrBtn.title = isQr
+          ? ""
+          : "请先在画布上选中本工具生成的二维码图层";
+      } finally {
+        syncingUi = false;
+      }
+    }
+
+    document.querySelector("aside.panel").addEventListener(
+      "pointerdown",
+      (e) => {
+        if (isUndoing) return;
+        const t = e.target;
+        if (t.matches && t.matches('input[type="range"]')) pushUndo();
+        else if (t.id === "bgColor") pushUndo();
+      },
+      true
+    );
+
+    let fontCustomUndoArmed = true;
+    ui.fontFamilyCustom.addEventListener("focusin", () => {
+      const s = getLayerById(state.selectedId);
+      if (!s || s.type !== "text" || ui.fontFamilyPreset.value !== "custom") return;
+      if (!fontCustomUndoArmed) return;
+      fontCustomUndoArmed = false;
+      pushUndo();
+    });
+    ui.fontFamilyCustom.addEventListener("blur", () => {
+      fontCustomUndoArmed = true;
+    });
+
+    canvas.addEventListener("pointerdown", (e) => {
+      const p = getPointerPos(e);
+      const hit = hitTest(p.x, p.y);
+      if (!hit) {
+        state.selectedId = null;
+        state.drag = null;
+        draw();
+        return;
+      }
+      pushUndo();
+      state.selectedId = hit.id;
+      const b = layerBounds(hit);
+      state.drag = { id: hit.id, ox: p.x - b.x, oy: p.y - b.y };
+      syncSelectedUi();
+      draw();
+    });
+
+    canvas.addEventListener("dblclick", (e) => {
+      const p = getPointerPos(e);
+      const hit = hitTest(p.x, p.y);
+      if (!hit || hit.type !== "text") return;
+      pushUndo();
+      state.selectedId = hit.id;
+      syncSelectedUi();
+      const next = window.prompt("编辑文字内容：", hit.text);
+      if (next === null) {
+        draw();
+        return;
+      }
+      hit.text = next;
+      draw();
+      syncSelectedUi();
+    });
+
+    canvas.addEventListener("pointermove", (e) => {
+      if (!state.drag) return;
+      const layer = getLayerById(state.drag.id);
+      if (!layer) return;
+      const p = getPointerPos(e);
+      layer.x = p.x - state.drag.ox;
+      layer.y = p.y - state.drag.oy + (layer.type === "text" ? layer.fontSize * layer.scale * 1.2 : 0);
+      draw();
+    });
+
+    window.addEventListener("pointerup", () => { state.drag = null; });
+
+    window.addEventListener("keydown", (e) => {
+      if (isTypingTarget(document.activeElement)) return;
+      if ((e.ctrlKey || e.metaKey) && (e.key === "z" || e.key === "Z")) {
+        e.preventDefault();
+        void undoAction();
+        return;
+      }
+      const s = getLayerById(state.selectedId);
+      if (!s) return;
+      const step = e.shiftKey ? 10 : 1;
+      let moved = true;
+      if (e.key === "ArrowLeft") {
+        beginArrowMoveUndo();
+        s.x -= step;
+      } else if (e.key === "ArrowRight") {
+        beginArrowMoveUndo();
+        s.x += step;
+      } else if (e.key === "ArrowUp") {
+        beginArrowMoveUndo();
+        s.y -= step;
+      } else if (e.key === "ArrowDown") {
+        beginArrowMoveUndo();
+        s.y += step;
+      } else moved = false;
+      if (!moved) return;
+      e.preventDefault();
+      draw();
+    });
+
+    ui.applySize.addEventListener("click", () => {
+      const w = Number(ui.canvasW.value);
+      const h = Number(ui.canvasH.value);
+      if (!w || !h || w < 300 || h < 300) return;
+      pushUndo();
+      canvas.width = w;
+      canvas.height = h;
+      draw();
+    });
+
+    ui.bgColor.addEventListener("input", () => {
+      state.bgColor = ui.bgColor.value;
+      draw();
+    });
+
+    ui.bgInput.addEventListener("change", async (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+      pushUndo();
+      state.bgImage = await loadImage(file);
+      draw();
+      e.target.value = "";
+    });
+
+    ui.imgInput.addEventListener("change", async (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+      pushUndo();
+      const img = await loadImage(file);
+      const fit = Math.min((canvas.width * 0.26) / img.width, (canvas.height * 0.34) / img.height, 1);
+      addImageLayer(img, canvas.width * 0.72, canvas.height * 0.16, fit, file.name);
+      e.target.value = "";
+    });
+
+    ui.addTextBtn.addEventListener("click", () => {
+      pushUndo();
+      addTextLayer(ui.textValue.value, ui.fontColor.value, Number(ui.fontSize.value) || 42, false);
+    });
+
+    ui.addStampBtn.addEventListener("click", () => {
+      pushUndo();
+      const text = ui.textValue.value.trim() || "检验专用章";
+      addTextLayer(text, "#c62828", Number(ui.fontSize.value) || 56, true);
+    });
+
+    ui.fontFamilyPreset.addEventListener("change", () => {
+      ui.fontCustomRow.style.display = ui.fontFamilyPreset.value === "custom" ? "flex" : "none";
+      if (syncingUi) return;
+      const s = getLayerById(state.selectedId);
+      if (!s || s.type !== "text") return;
+      pushUndo();
+      if (ui.fontFamilyPreset.value === "custom") {
+        ui.fontFamilyCustom.value = s.fontFamily || "";
+        fontCustomUndoArmed = false;
+        return;
+      }
+      fontCustomUndoArmed = true;
+      s.fontFamily = ui.fontFamilyPreset.value;
+      draw();
+    });
+
+    ui.fontFamilyCustom.addEventListener("input", () => {
+      if (syncingUi) return;
+      const s = getLayerById(state.selectedId);
+      if (!s || s.type !== "text" || ui.fontFamilyPreset.value !== "custom") return;
+      s.fontFamily = ui.fontFamilyCustom.value.trim() || "Microsoft YaHei, sans-serif";
+      draw();
+    });
+
+    ui.textValue.addEventListener("input", () => {
+      if (syncingUi) return;
+      const s = getLayerById(state.selectedId);
+      if (!s || s.type !== "text") return;
+      s.text = ui.textValue.value;
+      draw();
+    });
+
+    ui.fontSize.addEventListener("input", () => {
+      if (syncingUi) return;
+      const s = getLayerById(state.selectedId);
+      if (!s || s.type !== "text") return;
+      s.fontSize = Number(ui.fontSize.value) || 42;
+      draw();
+    });
+
+    ui.fontColor.addEventListener("input", () => {
+      if (syncingUi) return;
+      const s = getLayerById(state.selectedId);
+      if (!s || s.type !== "text") return;
+      s.color = ui.fontColor.value;
+      draw();
+    });
+
+    function applyImageLayerControlsFromUi() {
+      const s = getLayerById(state.selectedId);
+      if (!s || s.type !== "image") return;
+      s.rotation = (Number(ui.imageRotationDeg.value) * Math.PI) / 180;
+      s.blurPx = Number(ui.imageBlurPx.value) || 0;
+      s.grayscale = Math.min(1, Math.max(0, Number(ui.imageGrayscale.value) / 100));
+      s.brightness = Math.min(2, Math.max(0.3, Number(ui.imageBrightness.value) / 100));
+      draw();
+    }
+
+    ui.imageRotationDeg.addEventListener("input", applyImageLayerControlsFromUi);
+    ui.imageBlurPx.addEventListener("input", applyImageLayerControlsFromUi);
+    ui.imageGrayscale.addEventListener("input", applyImageLayerControlsFromUi);
+    ui.imageBrightness.addEventListener("input", applyImageLayerControlsFromUi);
+
+    ui.replaceLayerImageBtn.addEventListener("click", () => {
+      const s = getLayerById(state.selectedId);
+      if (!s || s.type !== "image") return;
+      ui.replaceLayerImageInput.click();
+    });
+
+    ui.replaceLayerImageInput.addEventListener("change", async (e) => {
+      const s = getLayerById(state.selectedId);
+      const file = e.target.files[0];
+      if (!s || s.type !== "image" || !file) {
+        e.target.value = "";
+        return;
+      }
+      pushUndo();
+      try {
+        const img = await loadImage(file);
+        s.img = img;
+        s.w = img.naturalWidth || img.width;
+        s.h = img.naturalHeight || img.height;
+        delete s.isQrLayer;
+        delete s.qrCertId;
+        delete s.qrUrlTpl;
+        syncSelectedUi();
+        draw();
+      } catch (_) {
+        alert("图片加载失败");
+      }
+      e.target.value = "";
+    });
+
+    ui.updateSelectedQrBtn.addEventListener("click", async () => {
+      const s = getLayerById(state.selectedId);
+      if (!s || s.type !== "image" || !s.isQrLayer) {
+        ui.qrHint.textContent = "请先在画布上选中本工具生成的二维码图层";
+        return;
+      }
+      const certId = ui.certIdValue.value.trim();
+      const tpl = ui.imageUrlTpl.value.trim();
+      const built = buildImageUrlFromParts(certId, tpl);
+      if (!built.ok) {
+        ui.qrHint.textContent = built.msg;
+        return;
+      }
+      if (!qrReady) ui.qrHint.textContent = "正在加载二维码库...";
+      const ready = await ensureQrLib();
+      if (!ready) {
+        ui.qrHint.textContent = "二维码库不可用";
+        return;
+      }
+      pushUndo();
+      try {
+        const ok = await renderQrToCanvas(ui.qrCanvas, built.imageUrl, 180);
+        if (!ok) {
+          ui.qrHint.textContent = "二维码生成失败";
+          return;
+        }
+        const qrImg = await canvasToImage(ui.qrCanvas);
+        const oldW = s.w * s.scale;
+        const oldH = s.h * s.scale;
+        s.img = qrImg;
+        s.w = qrImg.width;
+        s.h = qrImg.height;
+        s.scale = oldW / qrImg.width;
+        s.qrCertId = certId;
+        s.qrUrlTpl = tpl;
+        syncSelectedUi();
+        draw();
+        ui.qrHint.textContent = "二维码已更新";
+      } catch (_) {
+        ui.qrHint.textContent = "更新失败";
       }
     });
 
-    function onData(data) {
-      if (data.type === "AUTH_OK") {
-        presetInbox = null;
-        renderPngInbox = null;
-        updateStatus("sync", "已登录");
-        document.getElementById("login-box").style.display = "none";
-        document.getElementById("work-box").style.display = "block";
-        setMsg("等待管理端推送预设列表…");
+    ui.templateSelect.addEventListener("change", () => {
+      const v = ui.templateSelect.value;
+      if (v) ui.imageUrlTpl.value = v;
+    });
+
+    ui.saveTemplateBtn.addEventListener("click", () => {
+      const tpl = ui.imageUrlTpl.value.trim();
+      if (!tpl) {
+        ui.qrHint.textContent = "请先填写 URL模板再保存";
         return;
       }
-      if (data.type === "AUTH_FAIL") {
-        updateStatus("error", "账号或密码错误");
-        setMsg("");
+      const name = window.prompt("模板名称（将保存当前 URL 模板）");
+      if (!name || !String(name).trim()) return;
+      const list = loadTemplateList().filter((x) => x.name !== name.trim());
+      list.push({ name: name.trim(), tpl });
+      saveTemplateList(list);
+      refreshTemplateSelect();
+      ui.templateSelect.value = tpl;
+      ui.qrHint.textContent = "模板已保存";
+    });
+
+    ui.deleteTemplateBtn.addEventListener("click", () => {
+      const sel = ui.templateSelect;
+      if (sel.selectedIndex <= 0) {
+        ui.qrHint.textContent = "请先选择一个已保存模板";
         return;
       }
-      if (data.type === "RENDER_REQ_ACK") {
-        if (!renderReqUploadState || renderReqUploadState.tid !== data.tid) return;
-        const ackIdx = Number(data.i);
-        if (Number.isNaN(ackIdx)) return;
-        renderReqUploadState.lastAck = Math.max(
-          renderReqUploadState.lastAck,
-          ackIdx
-        );
-        const n = renderReqUploadState.n;
-        setProgressDeterminate(
-          ((ackIdx + 1) / n) * 100,
-          "正在上传合成请求 " + (ackIdx + 1) + "/" + n + " 片"
-        );
-        return;
-      }
-      if (data.type === "PRESET_PREVIEW") {
-        applyPresetPreviewToCard(data.id, data.previewDataUrl);
-        return;
-      }
-      if (data.type === "PRESET_LIST") {
-        presetInbox = null;
-        renderPngInbox = null;
-        lastRequestedPresetId = null;
-        renderPresetPicker(data.items);
-        clearPresetForm();
-        document.getElementById("submit-btn").disabled = true;
-        setMsg(data.items && data.items.length ? "请点击上方预设卡片" : "管理端暂无预设，请让管理员选择预设目录");
-        return;
-      }
-      if (data.type === "PRESET_DATA_BEGIN") {
-        if (data.id !== lastRequestedPresetId) return;
-        currentPresetId = data.id;
-        presetInbox = {
-          id: data.id,
-          n: data.n,
-          parts: new Array(data.n),
-          byteMode: !!data.byteMode,
-          tid: data.tid
-        };
-        setMsg("正在接收预设数据…");
-        setProgressDeterminate(
-          0,
-          "正在接收预设 0/" + data.n + " 片"
-        );
-        return;
-      }
-      if (data.type === "PRESET_DATA_CHUNK") {
-        if (!presetInbox || presetInbox.id !== data.id) return;
-        if (presetInbox.tid !== undefined && data.tid !== presetInbox.tid) return;
-        const idx = Number(data.i);
-        if (Number.isNaN(idx) || idx < 0 || idx >= presetInbox.n) return;
-        const bin = data.bytes != null ? data.bytes : data.data;
-        if (presetInbox.byteMode && bin != null) {
-          presetInbox.parts[idx] = toArrayBufferChunk(bin);
-          if (conn && conn.open) {
-            try {
-              conn.send({ type: "PRESET_ACK", i: idx, tid: data.tid });
-            } catch (e) {}
-          }
-        } else {
-          presetInbox.parts[idx] = data.part;
-        }
-        const n = presetInbox.n;
-        const done = idx + 1;
-        setProgressDeterminate(
-          (done / n) * 100,
-          "正在接收预设 " + done + "/" + n + " 片"
-        );
-        return;
-      }
-      if (data.type === "PRESET_DATA_END") {
-        if (!presetInbox || presetInbox.id !== data.id) return;
-        if (presetInbox.tid !== undefined && data.tid !== presetInbox.tid) return;
-        if (data.id !== lastRequestedPresetId) {
-          presetInbox = null;
-          stopRenderProgressUI();
+      const name = sel.options[sel.selectedIndex].textContent;
+      const list = loadTemplateList().filter((x) => x.name !== name);
+      saveTemplateList(list);
+      refreshTemplateSelect();
+      ui.qrHint.textContent = "已删除模板";
+    });
+
+    function onScaleSliderInput(e) {
+      const s = getLayerById(state.selectedId);
+      if (!s) return;
+      const v = Number(e.target.value);
+      s.scale = v / 100;
+      ui.scaleRange.value = String(v);
+      ui.qrScaleRange.value = String(v);
+      draw();
+    }
+    ui.scaleRange.addEventListener("input", onScaleSliderInput);
+    ui.qrScaleRange.addEventListener("input", onScaleSliderInput);
+
+    function onOpacitySliderInput(e) {
+      const s = getLayerById(state.selectedId);
+      if (!s) return;
+      const v = Number(e.target.value);
+      s.opacity = v / 100;
+      ui.opacityRange.value = String(v);
+      ui.qrOpacityRange.value = String(v);
+      draw();
+    }
+    ui.opacityRange.addEventListener("input", onOpacitySliderInput);
+    ui.qrOpacityRange.addEventListener("input", onOpacitySliderInput);
+
+    ui.qrBringFront.addEventListener("click", () => ui.bringFront.click());
+    ui.qrSendBack.addEventListener("click", () => ui.sendBack.click());
+    ui.qrDeleteLayer.addEventListener("click", () => ui.deleteLayer.click());
+    ui.qrCloneLayer.addEventListener("click", () => ui.cloneLayer.click());
+
+    ui.bringFront.addEventListener("click", () => {
+      const i = state.layers.findIndex((l) => l.id === state.selectedId);
+      if (i < 0) return;
+      pushUndo();
+      const [item] = state.layers.splice(i, 1);
+      state.layers.push(item);
+      draw();
+    });
+
+    ui.sendBack.addEventListener("click", () => {
+      const i = state.layers.findIndex((l) => l.id === state.selectedId);
+      if (i < 0) return;
+      pushUndo();
+      const [item] = state.layers.splice(i, 1);
+      state.layers.unshift(item);
+      draw();
+    });
+
+    ui.cloneLayer.addEventListener("click", () => {
+      const s = getLayerById(state.selectedId);
+      if (!s) return;
+      pushUndo();
+      const copy = { ...s, id: uid(), x: s.x + 28, y: s.y + 28 };
+      state.layers.push(copy);
+      state.selectedId = copy.id;
+      syncSelectedUi();
+      draw();
+    });
+
+    ui.deleteLayer.addEventListener("click", () => {
+      const i = state.layers.findIndex((l) => l.id === state.selectedId);
+      if (i < 0) return;
+      pushUndo();
+      state.layers.splice(i, 1);
+      state.selectedId = null;
+      syncSelectedUi();
+      draw();
+    });
+
+    ui.exportBtn.addEventListener("click", () => {
+      const a = document.createElement("a");
+      a.href = canvas.toDataURL("image/png");
+      a.download = "composite.png";
+      a.click();
+    });
+
+    ui.exportCanvasPresetBtn.addEventListener("click", async () => {
+      await exportPresetToLibraryPrompt();
+    });
+
+    ui.importCanvasPresetBtn.addEventListener("click", () => {
+      ui.importCanvasPresetInput.click();
+    });
+
+    ui.importCanvasPresetInput.addEventListener("change", async (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+      if (state.layers.length > 0) {
+        const ok = window.confirm("将替换当前画布内容（含图层与背景），是否继续？");
+        if (!ok) {
+          e.target.value = "";
           return;
         }
-        let raw;
-        if (presetInbox.byteMode) {
-          raw = joinUtf8Parts(presetInbox.parts);
-          if (raw == null) {
-            presetInbox = null;
-            stopRenderProgressUI();
-            setMsg("预设数据不完整");
-            document.getElementById("submit-btn").disabled = true;
-            return;
-          }
-        } else {
-          raw = presetInbox.parts.join("");
-        }
-        currentPresetId = presetInbox.id;
-        presetInbox = null;
-        let preset;
-        try {
-          preset = JSON.parse(raw);
-        } catch (e) {
-          stopRenderProgressUI();
-          setMsg("预设数据解析失败");
-          document.getElementById("submit-btn").disabled = true;
+      }
+      try {
+        const text = await file.text();
+        const data = JSON.parse(text);
+        pushUndo();
+        loadedFromLibraryId = null;
+        await applyCanvasPreset(data);
+      } catch (err) {
+        alert("导入失败：" + (err.message || err));
+      }
+      e.target.value = "";
+    });
+
+    if (ui.quickToDesignBtn) {
+      ui.quickToDesignBtn.addEventListener("click", async () => {
+        if (!selectedLibraryId) {
+          alert("请先在左侧点击一个预设名称。");
           return;
         }
-        renderPresetForm(preset);
-        document.getElementById("submit-btn").disabled = false;
-        setMsg("填写或替换后点击提交合成");
-        stopRenderProgressUI();
+        await loadPresetIntoDesign(selectedLibraryId);
+      });
+    }
+
+    ui.railNewTemplate.addEventListener("click", async () => {
+      openSynthEditor();
+      try {
+        await prepareNewTemplateDesign();
+        setAppMode("design");
+      } catch (e) {
+        alert("初始化画布失败：" + (e.message || e));
+      }
+    });
+
+    ui.exitSynthBtn.addEventListener("click", () => {
+      closeSynthEditor();
+    });
+
+    ui.railAddJson.addEventListener("click", () => ui.railAddJsonInput.click());
+    ui.railAddJsonInput.addEventListener("change", async (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+      if (!presetDirHandle) {
+        alert("请先选择预设文件夹。");
+        e.target.value = "";
         return;
       }
-      if (data.type === "PRESET_DATA") {
-        presetInbox = null;
-        if (data.id !== lastRequestedPresetId) return;
-        if (data.error) {
-          setMsg(data.error);
-          document.getElementById("submit-btn").disabled = true;
+      try {
+        const text = await file.text();
+        const data = JSON.parse(text);
+        if (!data || data.version !== CANVAS_PRESET_VERSION) {
+          alert("无效的预设 JSON（version 需为 " + CANVAS_PRESET_VERSION + "）");
+          e.target.value = "";
           return;
         }
-        currentPresetId = data.id;
-        renderPresetForm(data.preset);
-        document.getElementById("submit-btn").disabled = false;
-        setMsg("填写或替换后点击提交合成");
-        stopRenderProgressUI();
+        const name = safePresetFileStem(file.name.replace(/\.json$/i, ""));
+        await savePresetToFolder(name, data);
+      } catch (err) {
+        alert("写入失败：" + (err.message || err));
+      }
+      e.target.value = "";
+    });
+
+    ui.railDelete.addEventListener("click", async () => {
+      if (!selectedLibraryId) {
+        alert("请先在左侧选中一个预设（点击名称）。");
         return;
       }
-      if (data.type === "RENDER_PROGRESS") {
-        setProgressIndeterminate(data.text);
+      if (!presetDirHandle) {
+        alert("请先选择预设文件夹。");
         return;
       }
-      if (data.type === "RENDER_RESULT_BEGIN") {
-        renderPngInbox = {
-          n: data.n,
-          parts: new Array(data.n),
-          byteMode: !!data.byteMode,
-          tid: data.tid
-        };
-        setProgressDeterminate(0, "正在接收合成图 0/" + data.n + " 片");
+      if (!window.confirm("确定从当前文件夹删除 " + selectedLibraryId + ".json？")) return;
+      try {
+        await deletePresetFromFolder(selectedLibraryId);
+        if (loadedFromLibraryId === selectedLibraryId) loadedFromLibraryId = null;
+        selectedLibraryId = null;
+        quickPresetBase = null;
+        await renderPresetList();
+        updateQuickQrSectionVisibility();
+        setAppMode("design");
+      } catch (err) {
+        alert("删除失败：" + (err.message || err));
+      }
+    });
+
+    ui.railUpdateFromCanvas.addEventListener("click", () => updateLibraryFromCurrentCanvas());
+
+    async function pickPresetFolder() {
+      if (typeof window.showDirectoryPicker !== "function") {
+        alert("当前浏览器不支持「选择文件夹」。请使用 Chrome 或 Edge 桌面版；或仅用「导出画布预设」下载 JSON 后手动放入文件夹。");
         return;
       }
-      if (data.type === "RENDER_RESULT_CHUNK") {
-        if (!renderPngInbox) return;
-        if (renderPngInbox.tid !== undefined && data.tid !== renderPngInbox.tid) return;
-        const idx = Number(data.i);
-        if (Number.isNaN(idx) || idx < 0 || idx >= renderPngInbox.n) return;
-        const rbin = data.bytes != null ? data.bytes : data.data;
-        if (renderPngInbox.byteMode && rbin != null) {
-          renderPngInbox.parts[idx] = toArrayBufferChunk(rbin);
-          if (conn && conn.open) {
-            try {
-              conn.send({ type: "RENDER_ACK", i: idx, tid: data.tid });
-            } catch (e) {}
-          }
-        } else {
-          renderPngInbox.parts[idx] = data.part;
-        }
-        const n = renderPngInbox.n;
-        const done = idx + 1;
-        setProgressDeterminate(
-          (done / n) * 100,
-          "正在接收合成图 " + done + "/" + n + " 片"
-        );
-        return;
-      }
-      if (data.type === "RENDER_RESULT_END") {
-        if (!renderPngInbox) return;
-        if (renderPngInbox.tid !== undefined && data.tid !== renderPngInbox.tid) return;
-        let png;
-        if (renderPngInbox.byteMode) {
-          png = joinUtf8Parts(renderPngInbox.parts);
-          if (png == null) {
-            renderPngInbox = null;
-            stopRenderProgressUI();
-            document.getElementById("submit-btn").disabled = false;
-            setMsg("合成图数据不完整");
-            return;
-          }
-        } else {
-          png = renderPngInbox.parts.join("");
-        }
-        renderPngInbox = null;
-        stopRenderProgressUI();
-        document.getElementById("submit-btn").disabled = false;
-        const wrap = document.getElementById("result-wrap");
-        wrap.innerHTML = "";
-        const img = document.createElement("img");
-        img.alt = "合成结果";
-        img.src = png;
-        wrap.appendChild(img);
-        setMsg("完成");
-        return;
-      }
-      if (data.type === "RENDER_RESULT") {
-        renderPngInbox = null;
-        stopRenderProgressUI();
-        document.getElementById("submit-btn").disabled = false;
-        const wrap = document.getElementById("result-wrap");
-        wrap.innerHTML = "";
-        if (data.ok && data.png) {
-          const img = document.createElement("img");
-          img.alt = "合成结果";
-          img.src = data.png;
-          wrap.appendChild(img);
-          setMsg("完成");
-        } else {
-          setMsg("失败: " + (data.error || "未知错误"));
+      try {
+        presetDirHandle = await window.showDirectoryPicker({ mode: "readwrite" });
+        await idbSetDirHandle(presetDirHandle);
+        ui.presetFolderHint.textContent = "已选择文件夹（已记住，下次打开可自动请求权限）";
+        await renderPresetList();
+      } catch (err) {
+        if (err && err.name !== "AbortError") {
+          alert("选择文件夹失败：" + (err.message || err));
         }
       }
     }
 
-    document.getElementById("login-btn").addEventListener("click", () => {
-      const adminId =
-        document.getElementById("admin-id").value.trim() || ADMIN_ID_DEFAULT;
-      const u = document.getElementById("u").value.trim();
-      const p = document.getElementById("p").value;
-      if (!u || !p) {
-        setMsg("请填写账号和密码");
+    ui.railPickFolder.addEventListener("click", () => pickPresetFolder());
+
+    ui.quickAvatarInput.addEventListener("change", (e) => {
+      const f = e.target.files[0];
+      if (!f) {
+        quickAvatarDataUrl = null;
+        if (ui.quickAvatarPreviewWrap) {
+          ui.quickAvatarPreviewWrap.style.display = "none";
+          if (ui.quickAvatarPreview) ui.quickAvatarPreview.removeAttribute("src");
+        }
         return;
       }
+      const fr = new FileReader();
+      fr.onload = () => {
+        quickAvatarDataUrl = fr.result;
+        if (ui.quickAvatarPreview && ui.quickAvatarPreviewWrap) {
+          ui.quickAvatarPreview.src = fr.result;
+          ui.quickAvatarPreviewWrap.style.display = "block";
+        }
+      };
+      fr.readAsDataURL(f);
+    });
 
-      updateStatus("", "正在连接管理端…");
-      setMsg("");
-
-      if (conn) {
-        try { conn.close(); } catch (e) {}
-        conn = null;
+    ui.quickComposeBtn.addEventListener("click", async () => {
+      try {
+        await runQuickCompose();
+      } catch (err) {
+        alert("合成失败：" + (err.message || err));
       }
-      if (loginConnectTimer) {
-        clearTimeout(loginConnectTimer);
-        loginConnectTimer = null;
+    });
+
+    ui.quickPngBtn.addEventListener("click", async () => {
+      try {
+        await runQuickCompose();
+        const a = document.createElement("a");
+        a.href = canvas.toDataURL("image/png");
+        a.download = "composite.png";
+        a.click();
+      } catch (err) {
+        alert("导出失败：" + (err.message || err));
       }
+    });
 
-      clearPresetForm();
-      lastRequestedPresetId = null;
-      document.getElementById("preset-grid").innerHTML = "";
-      document.getElementById("submit-btn").disabled = true;
-
-      loginGen += 1;
-      const myGen = loginGen;
-      conn = peer.connect(adminId, DATA_CONN_OPTS);
-      const thisConn = conn;
-      const loginBtn = document.getElementById("login-btn");
-      loginBtn.disabled = true;
-
-      function releaseLoginUi() {
-        loginBtn.disabled = false;
+    ui.quickPdfBtn.addEventListener("click", async () => {
+      try {
+        await runQuickCompose();
+        await downloadPdfFromCanvas();
+      } catch (err) {
+        alert("PDF 失败：" + (err.message || err));
       }
+    });
 
-      loginConnectTimer = setTimeout(() => {
-        loginConnectTimer = null;
-        if (myGen !== loginGen) return;
-        if (thisConn && !thisConn.open) {
-          try {
-            thisConn.close();
-          } catch (e) {}
-          if (conn === thisConn) conn = null;
-          releaseLoginUi();
-          updateStatus(
-            "error",
-            "连接管理端超时：请确认中枢页面已打开、Peer ID 一致，或稍后重试。"
-          );
-          setMsg(
-            "若管理端已开仍超时，多为网络拦截 WebRTC，可换网络或浏览器。"
-          );
-        }
-      }, LOGIN_CONNECT_MS);
+    ui.quickUploadBtn.addEventListener("click", async () => {
+      ui.quickUploadMsg.textContent = "";
+      const url = ui.quickUploadApi.value.trim();
+      if (!url) {
+        ui.quickUploadMsg.textContent = "请填写上传 API 地址（POST，multipart 字段名 file）。";
+        return;
+      }
+      try {
+        await runQuickCompose();
+        const blob = await new Promise((resolve, reject) => {
+          canvas.toBlob((b) => (b ? resolve(b) : reject(new Error("toBlob failed"))), "image/png");
+        });
+        const fd = new FormData();
+        fd.append("file", blob, "composite.png");
+        const r = await fetch(url, { method: "POST", body: fd });
+        const text = await r.text();
+        ui.quickUploadMsg.textContent = r.ok
+          ? "上传成功（HTTP " + r.status + "）：" + text.slice(0, 280)
+          : "上传失败 " + r.status + "：" + text.slice(0, 200);
+      } catch (err) {
+        ui.quickUploadMsg.textContent = "请求失败：" + (err.message || err);
+      }
+    });
 
-      conn.on("error", (err) => {
-        console.error(err);
-        if (myGen !== loginGen) return;
-        if (loginConnectTimer) {
-          clearTimeout(loginConnectTimer);
-          loginConnectTimer = null;
+    (async function initPresetFolder() {
+      try {
+        const h = await idbGetDirHandle();
+        if (h) {
+          presetDirHandle = h;
+          const ok = await ensurePresetDirAccess();
+          ui.presetFolderHint.textContent = ok
+            ? "已恢复上次选择的文件夹"
+            : "请点击「选择预设文件夹」重新授权访问";
         }
-        releaseLoginUi();
-        const tip = formatPeerJsError(err);
-        updateStatus("error", tip);
-        setMsg(tip);
+      } catch (_) {
+        ui.presetFolderHint.textContent = "请点击「选择预设文件夹」";
+      }
+      await renderPresetList();
+    })();
+
+    setInterval(() => {
+      if (document.visibilityState === "visible" && presetDirHandle) {
+        renderPresetList();
+      }
+    }, 45000);
+
+    ui.genQrBtn.addEventListener("click", async () => {
+      if (!qrReady) {
+        ui.qrHint.textContent = "正在加载二维码库...";
+      }
+      const ready = await ensureQrLib();
+      if (!ready) {
+        ui.qrHint.textContent = "二维码库加载失败（网络可能拦截CDN），请切换网络或让我改成本地离线库";
+        return;
+      }
+      const result = buildQrPayload();
+      if (!result.ok) {
+        ui.qrHint.textContent = result.msg;
+        return;
+      }
+      pushUndo();
+      try {
+        const ok = await renderQrToCanvas(ui.qrCanvas, result.payload, 180);
+        if (!ok) {
+          ui.qrHint.textContent = "二维码库不可用，请联系我改为纯内置算法版本";
+          return;
+        }
+        const qrImg = await canvasToImage(ui.qrCanvas);
+        const size = Math.max(130, Math.round(Math.min(canvas.width, canvas.height) * 0.2));
+        const scale = size / qrImg.width;
+        addImageLayer(
+          qrImg,
+          canvas.width - size - 42,
+          canvas.height - size - 32,
+          scale
+        );
+        const qrLayer = getLayerById(state.selectedId);
+        if (qrLayer && qrLayer.type === "image") {
+          qrLayer.isQrLayer = true;
+          qrLayer.qrCertId = ui.certIdValue.value.trim();
+          qrLayer.qrUrlTpl = ui.imageUrlTpl.value.trim();
+        }
+        state.layers.push({
+          id: uid(),
+          type: "text",
+          text: "在\n线\n验",
+          x: canvas.width - 28,
+          y: canvas.height - size - 6,
+          fontSize: 34,
+          fontFamily: "Microsoft YaHei, sans-serif",
+          color: "#222222",
+          scale: 1,
+          rotation: 0,
+          opacity: 1,
+          bold: false
+        });
+        ui.qrHint.textContent = "已生成并添加到画布（右下角）";
+        draw();
+      } catch (err) {
+        ui.qrHint.textContent = "生成失败，请重试";
+      }
+    });
+
+    ensureQrLib().then((ok) => {
+      if (!ok) {
+        ui.qrHint.textContent = "二维码库未就绪：可先做排版，联网后再生成二维码";
+      }
+    });
+
+    refreshTemplateSelect();
+    ui.fontCustomRow.style.display = "none";
+
+    const sampleLines = [
+      "编  号: 450803198504076336",
+      "姓  名: 谭志灯   性  别: 男",
+      "从业类别: 食品",
+      "发证日期: 2026-03-25",
+      "有效期限: 一年",
+      "发证机构: 广州市增城区新塘医院"
+    ];
+    let y = 250;
+    sampleLines.forEach((line) => {
+      state.layers.push({
+        id: uid(),
+        type: "text",
+        text: line,
+        x: 45,
+        y,
+        fontSize: 52,
+        fontFamily: "SimSun, Songti SC, serif",
+        color: "#111111",
+        scale: 1,
+        rotation: 0,
+        opacity: 1,
+        bold: true
       });
+      y += 92;
+    });
+    state.selectedId = null;
+    draw();
+    syncSelectedUi();
 
-      conn.on("open", () => {
-        if (myGen !== loginGen) return;
-        if (!thisConn.open) return;
-        if (loginConnectTimer) {
-          clearTimeout(loginConnectTimer);
-          loginConnectTimer = null;
-        }
-        updateStatus("online", "已连接，验证中…");
-        try {
-          thisConn.send({ type: "AUTH", user: u, pass: p });
-        } catch (e) {
-          releaseLoginUi();
-          updateStatus("error", "发送登录信息失败，请重试");
-          setMsg(e.message || String(e));
-        }
-      });
+    if (new URLSearchParams(location.search).get("embed") === "1") {
+      document.documentElement.classList.add("embed-render");
+      openSynthEditor();
+    }
 
-      conn.on("close", () => {
-        if (myGen !== loginGen) return;
-        if (loginConnectTimer) {
-          clearTimeout(loginConnectTimer);
-          loginConnectTimer = null;
-        }
-        renderReqUploadState = null;
-        releaseLoginUi();
-        updateStatus("error", "与管理端断开");
-        document.getElementById("work-box").style.display = "none";
-        document.getElementById("login-box").style.display = "block";
-      });
+    function adminReplyTarget(ev) {
+      const o = ev.origin;
+      if (!o || o === "null") return "*";
+      return o;
+    }
 
-      conn.on("data", (data) => {
-        if (myGen !== loginGen) return;
-        if (data.type === "AUTH_OK" || data.type === "AUTH_FAIL") {
-          releaseLoginUi();
-        }
-        onData(data);
-      });
+    window.addEventListener("message", async (ev) => {
+      if (!ev.data || ev.data.type !== "ADMIN_APPLY_PRESET") return;
+      const preset = ev.data.preset;
+      const tgt = adminReplyTarget(ev);
+      if (!preset) {
+        ev.source.postMessage({ type: "ADMIN_RENDER_RESULT", ok: false, error: "缺少 preset" }, tgt);
+        return;
+      }
+      try {
+        await applyCanvasPreset(preset);
+        const png = canvas.toDataURL("image/png");
+        ev.source.postMessage({ type: "ADMIN_RENDER_RESULT", ok: true, png }, tgt);
+      } catch (err) {
+        ev.source.postMessage(
+          { type: "ADMIN_RENDER_RESULT", ok: false, error: err.message || String(err) },
+          tgt
+        );
+      }
     });
   </script>
 </body>
